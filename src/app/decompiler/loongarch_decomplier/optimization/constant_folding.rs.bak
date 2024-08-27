@@ -1,0 +1,89 @@
+use crate::loongarch_decomplier::*;
+
+pub fn constant_folding(ast: &mut AbstractSyntaxTree) {
+    match &ast.ast_type {
+        ASTType::Assign(_) => {
+            folding_assign(ast);        
+        }
+        _ => {
+            for next in ast.next.iter_mut() {
+                constant_folding(next);
+            }
+        }
+    }
+}
+
+fn folding_assign(ast: &mut AbstractSyntaxTree) -> Box<AbstractSyntaxTree> {
+    println!("{:?}", ast);
+    match ast.ast_type.clone() {
+        ASTType::Assign(_) => {
+            for next in ast.next.iter_mut() {
+                folding_assign(next);
+            }
+            return Box::new(AbstractSyntaxTree::new());
+        }
+        ASTType::Operator(op) => {
+            let operand1 = match &ast.next[0].ast_type {
+                ASTType::Integer(_, _) => ast.next[0].clone(),
+                ASTType::Operator(_) => folding_assign(ast), 
+                ASTType::Variable(_) => Box::new(AbstractSyntaxTree::new()),
+                _ => panic!("error"),
+            };
+
+            let operand2 = match &ast.next[1].ast_type {
+                ASTType::Integer(_, _) => ast.next[1].clone(),
+                ASTType::Operator(_) => folding_assign(ast), 
+                ASTType::Variable(_) => Box::new(AbstractSyntaxTree::new()),
+                _ => panic!("error"),
+            };
+
+            if let ASTType::Integer(s1, size1) = operand1.ast_type {
+                if let ASTType::Integer(s2, size2) = operand2.ast_type {
+                    let v1 = operand1.value;
+                    let v2 = operand2.value;
+
+                    let value = match op {
+                        Operator::Not => panic!("not error"),
+                        Operator::Xor => {
+                            v1 ^ v2
+                        }
+                        Operator::And => {
+                            v1 & v2
+                        }
+                        Operator::Div => {
+                            (v1 as isize / v2 as isize) as usize
+                        }
+                        Operator::Mul => {
+                            (v1 as isize * v2 as isize) as usize
+                        }
+                        Operator::Sub => {
+                            (v1 as isize - v2 as isize) as usize
+                        }
+                        Operator::Add => {
+                            (v1 as isize + v2 as isize) as usize
+                        }
+                        Operator::Or => {
+                            v1 | v2
+                        }                       
+                    };
+
+                    *ast = AbstractSyntaxTree {
+                        ast_type: ASTType::Integer(s1, size1),
+                        value,
+                        next: Vec::new(),
+                    };
+
+                    return Box::new(ast.clone());
+
+                } else {
+                    return Box::new(AbstractSyntaxTree::new());
+                }
+            } else {
+                return Box::new(AbstractSyntaxTree::new());
+            }
+        }
+        _ => {
+            return Box::new(AbstractSyntaxTree::new());
+        }
+    }
+}

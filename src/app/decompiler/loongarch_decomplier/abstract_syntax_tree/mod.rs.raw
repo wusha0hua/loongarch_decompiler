@@ -1,0 +1,1179 @@
+mod ast_symbol;
+
+pub use ast_symbol::*;
+
+use crate::{loongarch_decomplier::*, NameValue};
+use crate::loongarch_decomplier::data_flow;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AbstractSyntaxTree { 
+    pub ast_type: ASTType, 
+    pub value: usize,
+    pub next: Vec<Box<AbstractSyntaxTree>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ASTType {
+    Begin(String),
+    EndReturn,
+    Function(String),
+    Parameter(Option<String>),
+    Return,
+    Loop,
+    Break,
+    Continue,
+    Assign,
+    If,
+    Condiction(Relation),
+    Condictions,
+    True,
+    False,
+    Operator(Operator),
+    Variable,
+    Integer(bool),
+    Float(bool),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Operator {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    And,
+    Or,
+    Xor,
+    Not,
+}
+
+impl AbstractSyntaxTree {
+    pub fn new() -> Self {
+        Self {
+            ast_type: ASTType::Begin(String::from("None")),
+            value: 0,
+            next: Vec::new(),
+        }
+    }
+    pub fn from_cfg_tree(cft: &ControlFlowTree, cfg: &ControlFlowGraph, function_name: String, ast_symbol_map: &mut HashMap<usize, ASTSymbol>) -> Self {
+        let mut ast = AbstractSyntaxTree::new();
+        ast.ast_type = ASTType::Begin(function_name);
+        //let mut ast_symbol_map = HashMap::<usize, ASTSymbol>::new();
+        
+        if SHOW_CONTROL_FLOW_IN_DATA_FLOW_IR.load(std::sync::atomic::Ordering::SeqCst) {
+            println!("\n---------- control flow in data flow ir ----------");
+        }
+        let mut counter = Counter::new();
+        let mut address_symbol_map = HashMap::<(Address, usize), usize>::new();
+        cft.travel_cft_with_ast(&mut ast, cfg, ast_symbol_map, &mut address_symbol_map, &mut counter); 
+        if SHOW_CONTROL_FLOW_IN_DATA_FLOW_IR.load(std::sync::atomic::Ordering::SeqCst) {
+            println!("---------------------------------------------------\n");
+        }
+        ast
+    }
+
+    pub fn parse_condiction(condiction: Condiction, address_symbol_map: &mut HashMap<(Address, usize), usize>, ast_symbol_map: &mut HashMap<usize, ASTSymbol>, counter: &mut Counter) -> AbstractSyntaxTree {
+        let mut ast = AbstractSyntaxTree::new();
+        ast.ast_type = ASTType::Condiction(condiction.relation);
+
+        let mut ast1 = AbstractSyntaxTree::new();
+        let mut ast2 = AbstractSyntaxTree::new();
+
+        match &condiction.operand1 {
+            DFIOperand::Number(number) => {
+                ast1.value = number.value as usize;
+                ast1.ast_type = ASTType::Integer(number.signed);
+            }
+            DFIOperand::Symbol(symbol) => {
+                let ast_sym = create_symbol(symbol, address_symbol_map, ast_symbol_map, counter);
+                ast1.value = ast_sym.id;
+                ast1.ast_type = ASTType::Variable;
+            }
+            _ => panic!("error"),
+        }
+
+        ast.next.push(Box::new(ast1));
+
+        match &condiction.operand2 {
+            DFIOperand::Number(number) => {
+                ast2.value = number.value as usize;
+                ast2.ast_type = ASTType::Integer(number.signed);
+            }
+            DFIOperand::Symbol(symbol) => {
+                let ast_sym = create_symbol(symbol, address_symbol_map, ast_symbol_map, counter);
+                ast2.value = ast_sym.id;
+                ast2.ast_type = ASTType::Variable;
+            }
+            _ => panic!("error"),
+        }
+        
+        ast.next.push(Box::new(ast2));
+
+        ast
+    }
+
+    pub fn parse_access_condiction(condiction: Vec<Vec<Condiction>>, address_symbol_map: &mut HashMap<(Address, usize), usize>, ast_symbol_map: &mut HashMap<usize, ASTSymbol>, counter: &mut Counter) -> AbstractSyntaxTree {
+        let mut ast = AbstractSyntaxTree::new();
+        ast.ast_type = ASTType::Condictions;
+        let mut or_ast = AbstractSyntaxTree::new();
+        or_ast.ast_type = ASTType::Operator(Operator::Or);
+        for andcv in condiction {
+            let mut and_ast = AbstractSyntaxTree::new();
+            and_ast.ast_type = ASTType::Operator(Operator::And);
+            for c in andcv {
+                let cond_ast = AbstractSyntaxTree::parse_condiction(c, address_symbol_map, ast_symbol_map, counter); 
+                and_ast.next.push(Box::new(cond_ast));
+            }
+            or_ast.next.push(Box::new(and_ast));
+        }        
+        ast.next.push(Box::new(or_ast));
+        ast
+    }
+
+    pub fn parse_dfi(ir: &data_flow::DataFlowIr, ast_symbol_map: &mut HashMap<usize, ASTSymbol>, address_symbol_map: &mut HashMap<(Address, usize), usize>, counter: &mut Counter) -> Option<AbstractSyntaxTree> {
+        let mut ast = AbstractSyntaxTree::new();
+        let mut ast_operand1 = AbstractSyntaxTree::new();
+        let mut ast_operand2 = AbstractSyntaxTree::new();
+        let mut ast_operator = AbstractSyntaxTree::new();
+        match &ir.opcode {
+            DataFlowIrOpcode::Or => {
+                if let Some(DFIOperand::Symbol(symbol)) = &ir.operand1 {
+                    let mut ast_symbol = match address_symbol_map.get(&(symbol.address.clone(), symbol.id)) {
+                        Some(symbol) => ASTSymbol::new(*symbol),
+                        None => {
+                            let sid = counter.get();
+                            address_symbol_map.insert((symbol.address.clone(), symbol.id), sid);
+                            ASTSymbol::new(sid)
+                        }
+                    };
+                    let symtype = &symbol.sym_type;
+                    let sid = symbol.id;
+                    let size = &symbol.size;
+                    let is_value = symbol.value;
+
+                    ast_symbol.select_type = get_ast_type_from_size(size, is_value);
+                    
+                    
+                    match &symbol.address {
+                        Address::Stack(stack) => {
+                            ast_symbol.scope = Scope::Local;
+                        }
+                        Address::Memory(memory) => {
+                            ast_symbol.scope = Scope::Global;
+                        }
+                        Address::GR(gr) => {
+                            ast_symbol.scope = Scope::Temp;   
+                        }
+                        Address::FR(fr) => {
+                            ast_symbol.scope = Scope::Temp;
+                        }
+                    }
+
+                    ast.value = ast_symbol.id;
+                    ast.ast_type = ASTType::Assign;
+                    ast_symbol_map.insert(ast_symbol.id, ast_symbol);
+                } else {
+                    panic!("operand error");
+                }
+
+                ast_operator.ast_type = ASTType::Operator(Operator::Or);
+                ast_operator.value = 0;
+
+
+                match &ir.operand2 {
+                    Some(DFIOperand::Number(number)) => {
+                        ast_operand1.value = number.value as usize;
+                        ast_operand1.ast_type = ASTType::Integer(true);
+                    }
+                    Some(DFIOperand::Symbol(symbol)) => {
+                        let mut ast_symbol = match address_symbol_map.get(&(symbol.address.clone(), symbol.id)) {
+                            Some(symbol) => ASTSymbol::new(*symbol),
+                            None => {
+                                let sid = counter.get();
+                                address_symbol_map.insert((symbol.address.clone(), symbol.id), sid);
+                                ASTSymbol::new(sid)
+                            }
+                        };
+                        let symtype = &symbol.sym_type;
+                        let sid = symbol.id;
+                        let size = &symbol.size;
+                        let is_value = symbol.value;
+    
+                        ast_symbol.select_type = get_ast_type_from_size(size, is_value);
+                        
+                        
+                        match &symbol.address {
+                            Address::Stack(stack) => {
+                                ast_symbol.scope = Scope::Local;
+                            }
+                            Address::Memory(memory) => {
+                                ast_symbol.scope = Scope::Global;
+                            }
+                            Address::GR(gr) => {
+                                ast_symbol.scope = Scope::Temp;   
+                            }
+                            Address::FR(fr) => {
+                                ast_symbol.scope = Scope::Temp;
+                            }
+                        }
+    
+                        ast_operand1.value = ast_symbol.id;
+                        ast_operand1.ast_type = ASTType::Variable;
+                        ast_symbol_map.insert(ast_symbol.id, ast_symbol);
+    
+                    }
+                    _ => panic!("operand error"),
+                }
+
+                 match &ir.operand3 {
+                    Some(DFIOperand::Number(number)) => {
+                        ast_operand2.value = number.value as usize;
+                        ast_operand2.ast_type = ASTType::Integer(true);
+                    }
+                    Some(DFIOperand::Symbol(symbol)) => {
+                        let mut ast_symbol = match address_symbol_map.get(&(symbol.address.clone(), symbol.id)) {
+                            Some(symbol) => ASTSymbol::new(*symbol),
+                            None => {
+                                let sid = counter.get();
+                                address_symbol_map.insert((symbol.address.clone(), symbol.id), sid);
+                                ASTSymbol::new(sid)
+                            }
+                        };
+                        let symtype = &symbol.sym_type;
+                        let sid = symbol.id;
+                        let size = &symbol.size;
+                        let is_value = symbol.value;
+    
+                        ast_symbol.select_type = get_ast_type_from_size(size, is_value);
+                        
+                        
+                        match &symbol.address {
+                            Address::Stack(stack) => {
+                                ast_symbol.scope = Scope::Local;
+                            }
+                            Address::Memory(memory) => {
+                                ast_symbol.scope = Scope::Global;
+                            }
+                            Address::GR(gr) => {
+                                ast_symbol.scope = Scope::Temp;   
+                            }
+                            Address::FR(fr) => {
+                                ast_symbol.scope = Scope::Temp;
+                            }
+                        }
+    
+                        ast_operand2.value = ast_symbol.id;
+                        ast_operand2.ast_type = ASTType::Variable;
+                        ast_symbol_map.insert(ast_symbol.id, ast_symbol);
+    
+                    }
+                    _ => panic!("operand error"),
+                }               
+
+                ast_operator.next.push(Box::new(ast_operand1));
+                ast_operator.next.push(Box::new(ast_operand2));
+                
+                ast.next.push(Box::new(ast_operator));
+
+                Some(ast)
+            }
+            // DataFlowIrOpcode::Or
+            DataFlowIrOpcode::Add => {
+                let mut ast = AbstractSyntaxTree::new();
+                let mut operator = AbstractSyntaxTree::new();
+                let mut ast1 = AbstractSyntaxTree::new();
+                let mut ast2 = AbstractSyntaxTree::new();
+                    
+                if let Some(DFIOperand::Symbol(symbol)) = &ir.operand1 {
+                    let mut sym = create_symbol(symbol, address_symbol_map, ast_symbol_map, counter);
+                    ast.ast_type = ASTType::Assign;
+                    ast.value = sym.id;
+                } else {
+                    panic!("error");
+                }
+
+                match &ir.operand2 {
+                    Some(DFIOperand::Number(number)) => {
+                        ast1.value = number.value as usize;
+                        ast1.ast_type = ASTType::Integer(number.signed);
+                    }
+                    Some(DFIOperand::Symbol(symbol)) => {
+                        let sym = create_symbol(symbol, address_symbol_map, ast_symbol_map, counter);
+                        ast1.value = sym.id;
+                        ast1.ast_type = ASTType::Variable;
+                    }
+                    _ => panic!("error"),
+                }
+
+                match &ir.operand3 {
+                    Some(DFIOperand::Number(number)) => {
+                        ast2.value = number.value as usize;
+                        ast2.ast_type = ASTType::Integer(number.signed);
+                    }
+                    Some(DFIOperand::Symbol(symbol)) => {
+                        let sym = create_symbol(symbol, address_symbol_map, ast_symbol_map, counter);
+                        ast2.value = sym.id;
+                        ast2.ast_type = ASTType::Variable;
+                    }
+                    _ => panic!("error"),
+                }
+
+                operator.ast_type = ASTType::Operator(Operator::Add);
+                operator.next.push(Box::new(ast1));
+                operator.next.push(Box::new(ast2));
+                ast.next.push(Box::new(operator));
+
+                Some(ast)
+            }
+            DataFlowIrOpcode::Sub => {
+                let mut ast = AbstractSyntaxTree::new();
+                let mut operator = AbstractSyntaxTree::new();
+                let mut ast1 = AbstractSyntaxTree::new();
+                let mut ast2 = AbstractSyntaxTree::new();
+                    
+                if let Some(DFIOperand::Symbol(symbol)) = &ir.operand1 {
+                    let mut sym = create_symbol(symbol, address_symbol_map, ast_symbol_map, counter);
+                    ast.ast_type = ASTType::Assign;
+                    ast.value = sym.id;
+                } else {
+                    panic!("error");
+                }
+
+                match &ir.operand2 {
+                    Some(DFIOperand::Number(number)) => {
+                        ast1.value = number.value as usize;
+                        ast1.ast_type = ASTType::Integer(number.signed);
+                    }
+                    Some(DFIOperand::Symbol(symbol)) => {
+                        let sym = create_symbol(symbol, address_symbol_map, ast_symbol_map, counter);
+                        ast1.value = sym.id;
+                        ast1.ast_type = ASTType::Variable;
+                    }
+                    _ => panic!("error"),
+                }
+
+                match &ir.operand3 {
+                    Some(DFIOperand::Number(number)) => {
+                        ast2.value = number.value as usize;
+                        ast2.ast_type = ASTType::Integer(number.signed);
+                    }
+                    Some(DFIOperand::Symbol(symbol)) => {
+                        let sym = create_symbol(symbol, address_symbol_map, ast_symbol_map, counter);
+                        ast2.value = sym.id;
+                        ast2.ast_type = ASTType::Variable;
+                    }
+                    _ => panic!("error"),
+                }
+
+                operator.ast_type = ASTType::Operator(Operator::Sub);
+                operator.next.push(Box::new(ast1));
+                operator.next.push(Box::new(ast2));
+                ast.next.push(Box::new(operator));
+
+                Some(ast)
+                //panic!("sub");
+                //Some(ast)
+            }
+            DataFlowIrOpcode::Store => {
+                if let Some(DFIOperand::Symbol(symbol)) = &ir.operand2 {
+                    let mut ast_symbol = match address_symbol_map.get(&(symbol.address.clone(), symbol.id)) {
+                        Some(symbol) => ASTSymbol::new(*symbol),
+                        None => {
+                            let sid = counter.get();
+                            address_symbol_map.insert((symbol.address.clone(), symbol.id), sid);
+                            ASTSymbol::new(sid)
+                        }
+                    };
+                    let symtype = &symbol.sym_type;
+                    let sid = symbol.id;
+                    let size = &symbol.size;
+                    let is_value = symbol.value;
+
+                    ast_symbol.select_type = get_ast_type_from_size(size, is_value);
+                    
+                    
+                    match &symbol.address {
+                        Address::Stack(stack) => {
+                            ast_symbol.scope = Scope::Local;
+                        }
+                        Address::Memory(memory) => {
+                            ast_symbol.scope = Scope::Global;
+                        }
+                        Address::GR(gr) => {
+                            ast_symbol.scope = Scope::Temp;   
+                        }
+                        Address::FR(fr) => {
+                            ast_symbol.scope = Scope::Temp;
+                        }
+                    }
+
+                    ast.value = ast_symbol.id;
+                    ast.ast_type = ASTType::Assign;
+                    ast_symbol_map.insert(ast_symbol.id, ast_symbol);
+                } else {
+                    println!("{}", ir);
+                    println!("{:?}", ir);
+                    panic!("operand error");
+                }
+
+                match &ir.operand1 {
+                    Some(DFIOperand::Number(number)) => {
+                        ast_operand2.value = number.value as usize;
+                        ast_operand2.ast_type = ASTType::Integer(true);
+                    }
+                    Some(DFIOperand::Symbol(symbol)) => {
+                        let mut ast_symbol = match address_symbol_map.get(&(symbol.address.clone(), symbol.id)) {
+                            Some(symbol) => ASTSymbol::new(*symbol),
+                            None => {
+                                let sid = counter.get();
+                                address_symbol_map.insert((symbol.address.clone(), symbol.id), sid);
+                                ASTSymbol::new(sid)
+                            }
+                        };
+                        let symtype = &symbol.sym_type;
+                        let sid = symbol.id;
+                        let size = &symbol.size;
+                        let is_value = symbol.value;
+    
+                        ast_symbol.select_type = get_ast_type_from_size(size, is_value);
+                        
+                        
+                        match &symbol.address {
+                            Address::Stack(stack) => {
+                                ast_symbol.scope = Scope::Local;
+                            }
+                            Address::Memory(memory) => {
+                                ast_symbol.scope = Scope::Global;
+                            }
+                            Address::GR(gr) => {
+                                ast_symbol.scope = Scope::Temp;   
+                            }
+                            Address::FR(fr) => {
+                                ast_symbol.scope = Scope::Temp;
+                            }
+                        }
+    
+                        ast_operand2.value = ast_symbol.id;
+                        ast_operand2.ast_type = ASTType::Variable;
+                        ast_symbol_map.insert(ast_symbol.id, ast_symbol);
+    
+                    }
+                    _ => panic!("operand error"),
+                }
+
+                ast.next.push(Box::new(ast_operand2));
+
+                Some(ast)
+            }
+            // DataFlowIrOpcode::Store
+            DataFlowIrOpcode::Load => {
+                panic!("load");
+                Some(ast)
+            }
+            DataFlowIrOpcode::Call => {
+                let functions = FUNCTIONS.lock().unwrap();     
+                if let Some(DFIOperand::Number(number)) = &ir.operand1 {
+                    if let Some(name) = functions.get(&(number.value as usize)) {
+                        match name {
+                            NameValue::Name(name) => ast.ast_type = ASTType::Function(name.clone()), 
+                            NameValue::Value(value) => ast.ast_type = ASTType::Function(format!("funcion@{:x}", number.value)),
+                        }
+                    } else {
+                        ast.ast_type = ASTType::Function(format!("func@{:x}", number.value));
+                    }
+                } else {
+                    panic!("operand error");
+                }
+
+                ast_operand1.ast_type = ASTType::Return;
+                match &ir.operand3 {
+                    Some(DFIOperand::Symbol(symbol)) => {
+                        let mut ast_symbol = match address_symbol_map.get(&(symbol.address.clone(), symbol.id)) {
+                            Some(symbol) => ASTSymbol::new(*symbol),
+                            None => {
+                                let sid = counter.get();
+                                address_symbol_map.insert((symbol.address.clone(), symbol.id), sid);
+                                ASTSymbol::new(sid)
+                            }
+                        };
+                        let symtype = &symbol.sym_type;
+                        let sid = symbol.id;
+                        let size = &symbol.size;
+                        let is_value = symbol.value;
+    
+                        ast_symbol.select_type = get_ast_type_from_size(size, is_value);
+                        
+                        
+                        match &symbol.address {
+                            Address::Stack(stack) => {
+                                ast_symbol.scope = Scope::Local;
+                            }
+                            Address::Memory(memory) => {
+                                ast_symbol.scope = Scope::Global;
+                            }
+                            Address::GR(gr) => {
+                                ast_symbol.scope = Scope::Temp;   
+                            }
+                            Address::FR(fr) => {
+                                ast_symbol.scope = Scope::Temp;
+                            }
+                        }
+
+                        ast_operand1.value = ast_symbol.id;
+                        ast_symbol_map.insert(ast_symbol.id, ast_symbol);
+                        
+                    }
+
+
+                    Some(DFIOperand::Number(number)) => {
+                        ast_operand1.value = number.value as usize;
+                        ast_operand1.ast_type = ASTType::Integer(true);
+                    }
+                    _ => {
+                        println!("{:?}", ir.operand2);
+                        println!("{:?}", ir);
+                        panic!("operand error");
+                    }
+                }
+
+                ast.next.push(Box::new(ast_operand1));
+
+                if let Some(DFIOperand::Parameter(parameters)) = &ir.operand2 {
+                   for parameter in parameters.iter() {
+                        let mut parameter_ast = AbstractSyntaxTree::new();
+                        match parameter {
+                            RegisterRecord::Number(number) => {
+                                parameter_ast.value = number.value as usize; 
+                                parameter_ast.ast_type = ASTType::Integer(number.signed);
+                            }
+                            RegisterRecord::Symbol(symbol) => {
+                                let mut ast_sym = create_symbol(symbol, address_symbol_map, ast_symbol_map, counter);
+                                parameter_ast.ast_type = ASTType::Variable;
+                                parameter_ast.value = ast_sym.id;
+                            }
+                        }
+                        ast.next.push(Box::new(parameter_ast));
+                   } 
+
+                } else {
+                    panic!("error");
+                }
+
+                Some(ast)
+            }
+            // DataFlowIrOpcode::Call
+            DataFlowIrOpcode::Ret => {
+                let mut ast = AbstractSyntaxTree::new();
+                ast.ast_type = ASTType::EndReturn;
+                let mut return_ast = AbstractSyntaxTree::new();
+                match &ir.operand1 {
+                    Some(DFIOperand::Symbol(symbol)) => {
+                        let return_sym = create_symbol(symbol, address_symbol_map, ast_symbol_map, counter);
+                        return_ast.value = return_sym.id;
+                        return_ast.ast_type = ASTType::Variable;
+                    }
+                    Some(DFIOperand::Number(number)) => {
+                        return_ast.value = number.value as usize;
+                        return_ast.ast_type = ASTType::Integer(false);
+                    }
+                    _ => panic!("error"),
+                }
+                ast.next.push(Box::new(return_ast));
+                Some(ast)
+            }
+            DataFlowIrOpcode::Not => {
+                panic!("not");
+                Some(ast)
+            }
+            DataFlowIrOpcode::Xor => {
+                panic!("xor");
+                Some(ast)
+            }
+            DataFlowIrOpcode::And => {
+                panic!("and");
+                Some(ast)
+            }
+            DataFlowIrOpcode::Div => {
+                panic!("div");
+                Some(ast)
+            }
+            DataFlowIrOpcode::Mul => {
+                let mut ast = AbstractSyntaxTree::new();
+                let mut operator = AbstractSyntaxTree::new();
+                let mut ast1 = AbstractSyntaxTree::new();
+                let mut ast2 = AbstractSyntaxTree::new();
+                    
+                if let Some(DFIOperand::Symbol(symbol)) = &ir.operand1 {
+                    let mut sym = create_symbol(symbol, address_symbol_map, ast_symbol_map, counter);
+                    ast.ast_type = ASTType::Assign;
+                    ast.value = sym.id;
+                } else {
+                    panic!("error");
+                }
+
+                match &ir.operand2 {
+                    Some(DFIOperand::Number(number)) => {
+                        ast1.value = number.value as usize;
+                        ast1.ast_type = ASTType::Integer(number.signed);
+                    }
+                    Some(DFIOperand::Symbol(symbol)) => {
+                        let sym = create_symbol(symbol, address_symbol_map, ast_symbol_map, counter);
+                        ast1.value = sym.id;
+                        ast1.ast_type = ASTType::Variable;
+                    }
+                    _ => panic!("error"),
+                }
+
+                match &ir.operand3 {
+                    Some(DFIOperand::Number(number)) => {
+                        ast2.value = number.value as usize;
+                        ast2.ast_type = ASTType::Integer(number.signed);
+                    }
+                    Some(DFIOperand::Symbol(symbol)) => {
+                        let sym = create_symbol(symbol, address_symbol_map, ast_symbol_map, counter);
+                        ast2.value = sym.id;
+                        ast2.ast_type = ASTType::Variable;
+                    }
+                    _ => panic!("error"),
+                }
+
+                operator.ast_type = ASTType::Operator(Operator::Mul);
+                operator.next.push(Box::new(ast1));
+                operator.next.push(Box::new(ast2));
+                ast.next.push(Box::new(operator));
+
+                Some(ast)
+            }
+            _ => None,
+        }
+    }
+
+
+    pub fn to_string(&self, ast_symbol_map: &HashMap<usize, ASTSymbol>) -> String {
+        let mut ast_str = String::new();
+        let mut indent: usize = 0;
+        self.to_string_recursion(&mut ast_str, &mut indent, ast_symbol_map);
+        ast_str
+    }
+
+    fn to_string_recursion(&self, ast_str: &mut String, indent: &mut usize, ast_symbol_map: &HashMap<usize, ASTSymbol>) {
+        match &self.ast_type {
+            ASTType::Begin(name) => {
+                *ast_str += &format!("{}()\n", name);
+                *ast_str += "{\n";
+                *indent += 1;
+                for next in self.next.iter() {
+                    next.to_string_recursion(ast_str, indent, ast_symbol_map);
+                }
+                *indent -= 1;
+                *ast_str += "}\n";
+            }
+            ASTType::Function(f) => {
+                *ast_str += &get_indent(&indent);
+                for next in self.next.iter() {
+                    if let ASTType::Return = &next.ast_type {
+                        //*ast_str += &format!("var{} = ", next.value); 
+                        *ast_str += &variable_to_string(next, ast_symbol_map);
+                        *ast_str += " = ";
+                        break;
+                    }
+                }
+                *ast_str += &format!("{}", f);
+                *ast_str += "(";
+                for next in self.next.iter() {
+                    if let ASTType::Return = &next.ast_type {
+                        continue;
+                    }
+                    if *next == *self.next.last().unwrap() {
+                        //*ast_str += &format!("var{}", next.value); 
+                        match &next.ast_type {
+                            ASTType::Variable => *ast_str += &variable_to_string(next, ast_symbol_map),
+                            ASTType::Integer(_) => *ast_str += &integer_to_string(next),
+                            _ => panic!("error"),
+                        }
+                        break;
+                    } else {
+                        //*ast_str += &format!("var{}, ", next.value);
+                        match &next.ast_type {
+                            ASTType::Variable => *ast_str += &variable_to_string(next, ast_symbol_map),
+                            ASTType::Integer(_) => *ast_str += &integer_to_string(next),
+                            _ => panic!("error"),
+                        }
+                        *ast_str += ", ";
+                    }
+                }
+                *ast_str += ");\n";
+            }
+            ASTType::Parameter(x) => {panic!("error");}
+            ASTType::Return => {panic!("error");}
+            ASTType::EndReturn => {
+                //*ast_str += &format!("{}return var{};\n", get_indent(&indent), self.value);
+                //*ast_str += &variable_to_string(self, ast_symbol_map); 
+                *ast_str += &format!("{}return ", get_indent(&indent));
+                match &self.next.first().unwrap().ast_type {
+                    ASTType::Integer(_) => *ast_str += &integer_to_string(&self.next.first().unwrap()),
+                    ASTType::Variable => *ast_str += &variable_to_string(&self.next.first().unwrap(), ast_symbol_map),
+                    _ => panic!("error"),
+                }
+                *ast_str += ";\n";
+            }
+            ASTType::Assign => {
+                let mut assign_str = String::new();
+                let mut flag = 0;
+                assign_to_string(self, &mut assign_str, ast_symbol_map, &mut flag);
+                *ast_str += &format!("{}{}\n", get_indent(&indent), assign_str);
+
+                /*
+                *ast_str += &format!("{}var{} = ", get_indent(&indent), self.value);
+                for next in self.next.iter() {
+                    if *next == *self.next.last().unwrap() {
+                        *ast_str += &format!("var{};\n", next.value);
+                        break;
+                    } else {
+                        if let ASTType::Variable = &next.ast_type {
+                            *ast_str += &format!("var{}", next.value);
+                        } else if let ASTType::Operator(operator) = &next.ast_type {
+                            *ast_str += &format!(" {} ", convert_operator_to_string(operator));
+                        }
+                    }
+                }
+                */
+            }
+            ASTType::If => {
+                *ast_str += &get_indent(&indent);
+                *ast_str += "if";
+                *ast_str += "(";
+                for next in self.next.iter() {
+                    if let ASTType::Condictions = &next.ast_type {
+                        let mut conds_str = String::new();
+                        get_condictions_str(next, &mut conds_str, ast_symbol_map); 
+                        conds_str.remove(0);
+                        conds_str.pop();
+                        *ast_str += &conds_str;
+                    } else if let ASTType::Condiction(relation) = &next.ast_type {
+                        if let Some(operand1) = next.next.first() {
+                            //*ast_str += &format!("var{}", operand1.value);
+                            match &operand1.ast_type {
+                                ASTType::Integer(_) => *ast_str += &integer_to_string(&operand1),
+                                ASTType::Variable => *ast_str += &variable_to_string(&operand1, ast_symbol_map),
+                                _ => panic!("error"),
+                            }
+                        }
+
+                        //println!("@@@@@@@@@@@@@@{:?}", self.next.iter().filter(|t| t.ast_type == ASTType::True));
+                        /*
+                        for next in self.next.iter() {
+                            println!("{:?}: {}", next.ast_type, next.next.len());
+                        }
+                        */
+                        /*
+                        for next in self.next.iter() {
+                            if let ASTType::True = &next.ast_type {
+                                if next.next.len() == 0 {
+                                    true_exist = false;
+
+                                }
+                            }
+                            if let ASTType::False = &next.ast_type {
+                                if next.next.len() == 0 {
+                                    false_exist = false;
+                                }
+                            }
+                        }
+                        */
+
+
+                        *ast_str += &format!(" {} ", relation);
+
+                        if let Some(operand2) = next.next.last() {
+                            //*ast_str += &format!("var{}", operand2.value);
+                            match &operand2.ast_type {
+                                ASTType::Integer(_) => *ast_str += &integer_to_string(&operand2),
+                                ASTType::Variable => *ast_str += &variable_to_string(&operand2, ast_symbol_map),
+                                _ => panic!("error"),
+                            }
+                        }
+                        break;
+                    }
+                } 
+                *ast_str += ")\n";
+                *ast_str += &format!("{}{}", get_indent(&indent), "{\n");
+                *indent += 1;
+                for next in self.next.iter() {
+                    if let ASTType::True = &next.ast_type {
+                        //*ast_str += &format!("{}{}", get_indent(&indent), "{\n");
+                        //*indent += 1;
+                        next.to_string_recursion(ast_str, indent, ast_symbol_map);
+                        //*indent -= 1;
+                        //*ast_str += &format!("{}{}", get_indent(&indent), "}\n");
+                        break;
+                    }
+                }
+                *indent -= 1;
+                *ast_str += &format!("{}{}", get_indent(&indent), "}\n");
+                for next in self.next.iter() {
+                    if let ASTType::False = &next.ast_type {
+                        *ast_str += &format!("{}else\n", get_indent(&indent));
+                        *ast_str += &format!("{}{}", get_indent(&indent), "{\n");
+                        *indent += 1;
+                        next.to_string_recursion(ast_str, indent, ast_symbol_map);
+                        *indent -= 1;
+                        *ast_str += &format!("{}{}", get_indent(&indent), "}\n");
+                        break;
+                    }
+                }
+                
+            }
+            ASTType::Condiction(Relation) => {}
+            ASTType::Condictions => {}
+            ASTType::True => {
+                for next in self.next.iter() {
+                    next.to_string_recursion(ast_str, indent, ast_symbol_map);
+                }
+            }
+            ASTType::False => {
+                for next in self.next.iter() {
+                    next.to_string_recursion(ast_str, indent, ast_symbol_map);
+                }
+            }
+            ASTType::Operator(Operator) => {}
+            ASTType::Variable => {}
+            ASTType::Integer(signed) => {}
+            ASTType::Float(signed) => {}
+            ASTType::Loop => {
+                *ast_str += &format!("{}loop\n", get_indent(&indent));
+                *ast_str += &format!("{}{}\n", get_indent(&indent), "{");
+                *indent += 1;
+                for next in self.next.iter() {
+                    next.to_string_recursion(ast_str, indent, ast_symbol_map);
+                }
+                *indent -= 1;
+                *ast_str += &format!("{}{}\n", get_indent(&indent), "}");
+            }
+            ASTType::Break => {
+                *ast_str += &format!("{}break;\n", get_indent(&indent));
+            }
+            ASTType::Continue => {
+                *ast_str += &format!("{}continue;\n", get_indent(&indent));
+            }
+        } 
+    }
+
+}
+
+fn get_indent(indent: &usize) -> String {
+    let mut res = String::new();
+    for _ in 0..*indent {
+        res += "\t";
+    }
+    res
+}
+
+fn convert_operator_to_string(operator: &Operator) -> String {
+    match operator {
+        Operator::Add => String::from("+"),
+        Operator::Sub => String::from("-"),
+        Operator::Mul => String::from("*"),
+        Operator::Div => String::from("/"),
+        Operator::And => String::from("&"),
+        Operator::Or => String::from("|"),
+        Operator::Xor => String::from("^"),
+        Operator::Not => String::from("!"),
+    }
+}
+
+
+fn convert_operator_to_string_in_condiction(operator: &Operator) -> String {
+    let mut res = String::new();
+    if let Operator::Or = operator {
+        res += "||";
+    } else if let Operator::And = operator {
+        res += "&&";
+    }
+    res
+}
+
+fn convert_astsymbolvaluetype_to_string(_type: &ASTSymbolValueType) -> String {
+    match _type {
+        ASTSymbolValueType::UnsignedChar => String::from("unsigned char"),
+        ASTSymbolValueType::Char => String::from("char"),
+        ASTSymbolValueType::UnsignedShort => String::from("unsigned short"),
+        ASTSymbolValueType::Short => String::from("short"),
+        ASTSymbolValueType::UnsignedInt => String::from("unsigned int"),
+        ASTSymbolValueType::Int => String::from("int"),
+        ASTSymbolValueType::UnsignedLong => String::from("unsigned long"),
+        ASTSymbolValueType::Long => String::from("long"),
+        ASTSymbolValueType::PtrUnsignedChar => String::from("unsigned char*"),
+        ASTSymbolValueType::PtrChar => String::from("char*"),
+        ASTSymbolValueType::PtrUnsignedShort => String::from("unsigned short*"),
+        ASTSymbolValueType::PtrShort => String::from("short*"),
+        ASTSymbolValueType::PtrUnsignedInt => String::from("unsigned int*"),
+        ASTSymbolValueType::PtrInt => String::from("int*"),
+        ASTSymbolValueType::PtrUnsignedLong => String::from("unsigned long*"),
+        ASTSymbolValueType::PtrLong => String::from("long*"),
+        ASTSymbolValueType::Unknown => String::from("unkown"),
+    }
+}
+
+
+fn get_ast_type_from_size(size: &Size, is_value: bool) -> ASTSymbolValueType {
+    match size {
+        Size::Signed8 => {
+            if is_value {
+                ASTSymbolValueType::Char
+            } else {
+                ASTSymbolValueType::PtrChar
+            }
+        }
+        Size::Unsigned8 => {
+            if is_value {
+                ASTSymbolValueType::UnsignedChar
+            } else {
+                ASTSymbolValueType::PtrUnsignedChar
+            }
+        }
+        Size::Signed16 => {
+            if is_value {
+                ASTSymbolValueType::Short
+            } else {
+                ASTSymbolValueType::PtrShort
+            }
+        }
+        Size::Unsigned16 => {
+            if is_value {
+                ASTSymbolValueType::UnsignedShort
+            } else {
+                ASTSymbolValueType::PtrUnsignedShort
+            }
+        }
+        Size::Signed32 => {
+            if is_value {
+                ASTSymbolValueType::Int
+            } else {
+                ASTSymbolValueType::PtrInt
+            }
+        }
+        Size::Unsigned32 => {
+            if is_value {
+                ASTSymbolValueType::UnsignedInt
+            } else {
+                ASTSymbolValueType::PtrUnsignedInt
+            }
+        }
+        Size::Signed64 => {
+            if is_value {
+                ASTSymbolValueType::Long
+            } else {
+                ASTSymbolValueType::PtrLong
+            }
+        }
+        Size::Unsigned64 => {
+            if is_value {
+                ASTSymbolValueType::UnsignedLong
+            } else {
+                ASTSymbolValueType::PtrUnsignedLong
+            }
+        }
+    }
+}
+
+fn get_condictions_str(tree: &Box<AbstractSyntaxTree>, conds_str: &mut String, ast_symbol_map: &HashMap<usize, ASTSymbol>) {
+    if let ASTType::Condictions = &tree.ast_type {
+        for next in tree.next.iter() {
+            get_condictions_str(next, conds_str, ast_symbol_map);
+        }
+    } else if let ASTType::Operator(o) = &tree.ast_type {
+        *conds_str += "(";
+        for next in tree.next.iter() {
+            get_condictions_str(next, conds_str, ast_symbol_map); 
+            if *next != *tree.next.last().unwrap() {
+                *conds_str += &format!(" {} ", convert_operator_to_string_in_condiction(o));
+            }
+        }
+        *conds_str += ")";
+    } else if let ASTType::Condiction(relation) = &tree.ast_type {
+        if let Some(operand1) = tree.next.first() {
+			//*conds_str += &format!("var{}", operand1.value);
+            match &operand1.ast_type {
+                ASTType::Variable => *conds_str += &variable_to_string(&operand1, ast_symbol_map),
+                ASTType::Integer(_) => *conds_str += &integer_to_string(&operand1),
+                _ => panic!("error"),
+            }
+		}
+
+		*conds_str += &format!(" {} ", relation);
+
+		if let Some(operand2) = tree.next.last() {
+            match &operand2.ast_type {
+                ASTType::Variable => *conds_str += &variable_to_string(&operand2, ast_symbol_map),
+                ASTType::Integer(_) => *conds_str += &integer_to_string(&operand2),
+                _ => panic!("error"),
+            }
+		}
+    }
+    /*
+    for next in tree.next.iter() {
+        if let ASTType::Operator(o) = &next.ast_type {
+            println!("{:?}", o);
+            *conds_str += "(";
+            //println!("{}", "(");
+            for n in next.next.iter() {
+                //println!("{:#?}", n);
+                get_condictions_str(next, conds_str);
+                if *n != *next.next.last().unwrap() {
+                    *conds_str += &format!(" {:?} ", o);
+                    //println!(" {:?} ", o);
+                    //panic!("{:#?}", n);
+                }
+            }
+            *conds_str += ")";
+            //println!("{}", ")");
+        } else if let ASTType::Condiction(relation) = &next.ast_type {
+            if let Some(operand1) = next.next.first() {
+			    *conds_str += &format!("var{}", operand1.value);
+			}
+
+			*conds_str += &format!(" {} ", relation);
+
+			if let Some(operand2) = next.next.last() {
+			    *conds_str += &format!("var{}", operand2.value);
+			}
+			break;
+
+        }
+    }
+    */
+    /*
+    if let ASTType::Condictions = &tree.ast_type {
+        for next in tree.next.iter() {
+            get_condictions_str(next, conds_str);
+        } 
+    } else if let ASTType::Operator(o) = &tree.ast_type {
+        
+    } else {
+
+    }
+    */
+}
+
+fn assign_to_string(tree: &AbstractSyntaxTree, assign_str: &mut String, ast_symbol_map: &HashMap<usize, ASTSymbol>, flag: &mut usize) {
+    if let ASTType::Assign = &tree.ast_type {
+        let symbol = match ast_symbol_map.get(&tree.value) {
+            Some(sym) => sym,
+            None => panic!("error"),
+        };
+        *assign_str += &format!("var{} = ", symbol.id);
+        for next in tree.next.iter() {
+            assign_to_string(next, assign_str, ast_symbol_map, flag);
+        }
+        *assign_str += ";";
+    } else if let ASTType::Operator(o) = &tree.ast_type {
+        /*
+        if let o = Operator::Add {
+            println!("+");
+        }
+        */
+        *assign_str += "(";
+        for (i, next) in tree.next.iter().enumerate() {
+            assign_to_string(next, assign_str, ast_symbol_map, flag);
+            if i != tree.next.len() - 1 {
+                *assign_str += &format!(" {} ", convert_operator_to_string(o));
+            }
+        }
+        *assign_str += ")";
+    } else {
+        match &tree.ast_type {
+            ASTType::Integer(signed) => {
+                if *signed {
+                    *assign_str += &format!("{}", tree.value as isize);
+                } else {
+                    *assign_str += &format!("{}", tree.value as usize);
+                }
+            }
+            ASTType::Variable => {
+                let symbol = &ast_symbol_map[&tree.value];
+                match &symbol.scope {
+                    Scope::Temp => {
+                        *assign_str += &format!("var{}", symbol.id);
+                    }
+                    Scope::Local => {
+                        *assign_str += &format!("var{}", symbol.id); 
+                    }
+                    Scope::Global => {
+                        *assign_str += &format!("var{}", symbol.id);
+                    }
+                }
+            }
+            _ => panic!("error"),
+        }
+    }
+}
+
+fn integer_to_string(tree: &AbstractSyntaxTree) -> String {
+    if let ASTType::Integer(signed) = tree.ast_type {
+        if signed {
+            format!("{}", tree.value as isize)
+        } else {
+            format!("{}", tree.value as usize)
+        }
+    } else {
+        panic!("error");
+    }
+}
+
+fn variable_to_string(tree: &AbstractSyntaxTree, ast_symbol_map: &HashMap<usize, ASTSymbol>) -> String {
+    if ASTType::Variable == tree.ast_type || ASTType::Return == tree.ast_type {
+        let symbol = &ast_symbol_map[&tree.value];
+        match symbol.scope {
+            Scope::Temp => format!("var{}", symbol.id),
+            Scope::Local => format!("var{}", symbol.id),
+            Scope::Global => format!("var{}", symbol.id),
+        }
+    } else {
+        panic!("error");
+    }
+}
+
+
+fn create_symbol(symbol: &DFISymbolRecord, address_symbol_map: &mut HashMap<(Address, usize), usize>, ast_symbol_map: &mut HashMap<usize, ASTSymbol>, counter: &mut Counter) -> ASTSymbol {
+	let mut ast_symbol = match address_symbol_map.get(&(symbol.address.clone(), symbol.id)) {
+	    Some(symbol) => ASTSymbol::new(*symbol),
+	    None => {
+	        let sid = counter.get();
+	        address_symbol_map.insert((symbol.address.clone(), symbol.id), sid);
+	        ASTSymbol::new(sid)
+	    }
+	};
+	let symtype = &symbol.sym_type;
+	let sid = symbol.id;
+	let size = &symbol.size;
+	let is_value = symbol.value;
+    
+	ast_symbol.select_type = get_ast_type_from_size(size, is_value);
+	
+	
+	match &symbol.address {
+	    Address::Stack(stack) => {
+	        ast_symbol.scope = Scope::Local;
+	    }
+	    Address::Memory(memory) => {
+	        ast_symbol.scope = Scope::Global;
+	    }
+	    Address::GR(gr) => {
+	        ast_symbol.scope = Scope::Temp;   
+	    }
+	    Address::FR(fr) => {
+	        ast_symbol.scope = Scope::Temp;
+	    }
+	}
+    ast_symbol_map.insert(ast_symbol.id, ast_symbol.clone());
+    ast_symbol
+}
+
+
+/*
+impl std::fmt::Display for AbstractSyntaxTree {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_string()) 
+    }
+}
+*/

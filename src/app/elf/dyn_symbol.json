@@ -1,0 +1,50 @@
+[
+  {
+    "offset": 4831840288,
+    "name": "__libc_csu_fini",
+    "size": 4,
+    "sym_type": "Func",
+    "reloc_type": "R_LARCH_64",
+    "value": 4831840288
+  },
+  {
+    "offset": 0,
+    "name": "__libc_start_main",
+    "size": 0,
+    "sym_type": "Func",
+    "reloc_type": "R_LARCH_64",
+    "value": 0
+  },
+  {
+    "offset": 0,
+    "name": "abort",
+    "size": 0,
+    "sym_type": "Func",
+    "reloc_type": "R_LARCH_64",
+    "value": 0
+  },
+  {
+    "offset": 4831840136,
+    "name": "__libc_csu_init",
+    "size": 148,
+    "sym_type": "Func",
+    "reloc_type": "R_LARCH_64",
+    "value": 4831840136
+  },
+  {
+    "offset": 4831839928,
+    "name": "main",
+    "size": 204,
+    "sym_type": "Func",
+    "reloc_type": "R_LARCH_64",
+    "value": 4831839928
+  },
+  {
+    "offset": 4831870992,
+    "name": "printf",
+    "size": 0,
+    "sym_type": "Func",
+    "reloc_type": "R_LARCH_JUMP_SLOT",
+    "value": 0
+  }
+]

@@ -1,0 +1,482 @@
+use crate::loongarch_decomplier::*;
+
+#[derive(Debug, Clone)]
+struct Graph {
+    root: usize,
+    vertexs: HashSet<usize>,
+    edges: HashMap<usize, (usize, usize)>,
+    childs: HashMap<usize, Vec<usize>>,
+    parents: HashMap<usize, Vec<usize>>,
+}
+
+impl Graph {
+    fn new() -> Self {
+        Self {
+            root: 0,
+            vertexs: HashSet::new(),
+            edges: HashMap::new(),
+            childs: HashMap::new(),
+            parents: HashMap::new(),
+        }
+    }
+}
+
+pub fn get_cycle_paths(cfg: &ControlFlowGraph) -> Vec<Vec<usize>> {
+    let graph = simplify(cfg);
+    let mut paths = Vec::new();
+    let mut path_stack = Vec::<usize>::new();
+    let mut instack = HashMap::<usize, bool>::new();
+    let mut marked = HashMap::<usize, bool>::new();
+
+    for v in graph.vertexs.iter() {
+        instack.insert(*v, false);
+        marked.insert(*v, false);
+    }
+    
+    for v in 0..graph.vertexs.len() {
+        if !marked[&v] {
+            cycle_path_dfs(&graph, v, &mut paths, &mut path_stack, &mut instack, &mut marked);
+        }
+    } 
+      
+    paths
+}
+
+fn cycle_path_dfs(graph: &Graph, v: usize, paths: &mut Vec<Vec<usize>>, path_stack: &mut Vec<usize>, instack: &mut HashMap<usize, bool>, marked: &mut HashMap<usize, bool>) {
+    instack.insert(v, true);
+    marked.insert(v, true);
+    path_stack.push(v);
+    for c in &graph.childs[&v] {
+        if !instack[c] {
+            cycle_path_dfs(graph, *c, paths, path_stack, instack, marked);
+        } else {
+            let mut cycle = false;
+            let mut path = Vec::<usize>::new();
+            for v in path_stack.iter() {
+                if *v == *c {
+                    cycle = true;
+                }
+                if cycle {
+                    path.push(*v);
+                }
+            }
+            paths.push(path);
+        }
+    }
+    instack.insert(v, false);
+    path_stack.pop();
+}
+
+fn graph_topo_sort(graph: &Graph) -> (Vec<usize>, Vec<Vec<usize>>) {
+    let mut topo_index = Vec::<usize>::new();
+    let mut _topo_index = Vec::<Vec<usize>>::new();
+    
+    let mut graph = graph.clone(); 
+
+    while graph.vertexs.len() != 0 {
+        let mut t = Vec::<usize>::new();
+        for v in graph.vertexs.iter() {
+            if graph.parents[v].len() == 0 {
+                t.push(*v);
+                topo_index.push(*v);
+            }
+        }
+
+        for v in t.iter() {
+            graph.vertexs.remove(v);
+            
+            for p in graph.parents.iter_mut() {
+                let mut i = 0;
+                while i < p.1.len() {
+                    if p.1[i] == *v {
+                        p.1.remove(i);
+                        break;
+                    }
+                    i += 1;
+                }
+            }
+        }
+
+        _topo_index.push(t);
+
+    }
+
+    println!("{:?}\n{:?}", topo_index, _topo_index);
+    (topo_index, _topo_index)
+}
+
+pub fn topo_sort(cfg: &ControlFlowGraph) -> (Vec<usize>, Vec<Vec<usize>>){
+    let mut topo_index = Vec::<usize>::new();
+    let mut _topo_index = Vec::<Vec<usize>>::new();
+    
+    let mut graph = simplify(cfg); 
+
+    while graph.vertexs.len() != 0 {
+        let mut t = Vec::<usize>::new();
+        for v in graph.vertexs.iter() {
+            if graph.parents[v].len() == 0 {
+                t.push(*v);
+                topo_index.push(*v);
+            }
+        }
+
+        for v in t.iter() {
+            graph.vertexs.remove(v);
+            
+            for p in graph.parents.iter_mut() {
+                let mut i = 0;
+                while i < p.1.len() {
+                    if p.1[i] == *v {
+                        p.1.remove(i);
+                        break;
+                    }
+                    i += 1;
+                }
+            }
+        }
+
+        _topo_index.push(t);
+
+    }
+
+    (topo_index, _topo_index)
+}
+
+pub fn get_control_flow_trees(cfg: &ControlFlowGraph) -> Vec<ControlFlowTree> {
+    let mut control_flow_trees = Vec::new();
+    let mut graph = simplify(cfg);
+    
+    let (slices, parents, childs, belong) = get_graph_slices(&graph);
+    //println!("{:#?}", slices);
+    
+    let heads_index = build_control_flow_tree(&slices, &mut control_flow_trees, cfg, &parents, &childs);
+
+    let trees = control_flow_trees.clone();
+    for tree in control_flow_trees.iter_mut() {
+        let to = tree.id;
+        for e in graph.edges.iter() {
+            let (_from, _to) = e.1;
+            if to == *_to {
+                let root = belong[_from]; 
+                let index = heads_index[&root];
+                match trees[index].search(*_from) {
+                    Some(t) => {
+                        //println!("{:?}", t);
+                        if let Some(v) = t.access_condiction.get(0) {
+                            tree.access_condiction.push(v.clone());
+                        }
+
+                    }
+                    None => {
+                        panic!("{}", _from);
+                    }
+                }
+            }
+        }
+    }
+    //println!("{:#?}", control_flow_trees);
+    
+    control_flow_trees
+}
+
+fn build_control_flow_tree(slices: &Vec<Graph>, control_flow_trees: &mut Vec<ControlFlowTree>, cfg: &ControlFlowGraph, parents: &HashMap<usize, Vec<usize>>, childs: &HashMap<usize, Vec<usize>>) -> HashMap<usize, usize> {
+    for slice in slices.iter() {
+        let root = slice.root;
+        let mut tree = ControlFlowTree::new(root);
+        let mut stack = Vec::<usize>::new();
+        stack.push(root);
+
+        while !stack.is_empty() {
+            //println!("{:?}", stack);
+            stack.reverse();
+            let v = stack.pop().unwrap();
+            stack.reverse();
+            let mut edge = Vec::<(usize, usize)>::new();
+            for c in slice.childs[&v].iter() {
+                stack.push(*c);
+                edge.push((v, *c));
+            }
+    
+            for edge in edge {
+                let from = edge.0;
+                let to = edge.1;
+            
+                for e in cfg.edges.iter() {
+                    let edge = e.1;
+                    if from == edge.from && to == edge.to {
+                        if let None = &edge.condiction {
+                            tree.insert(from, to, Branch::Next, None); 
+                        } else if let Some(cond) = &edge.condiction {
+                            let cond_id = cfg.condiction[cond];
+                            if let Some(_true) = &edge._true {
+                                if *_true {
+                                    tree.insert(from, to, Branch::True, Some(cond_id));
+                                } else {
+                                    tree.insert(from, to, Branch::False, Some(cond_id));
+                                }
+                            }
+                        }
+                    }
+                }    
+
+            }
+        } 
+
+        //println!("{:#?}", tree);
+        control_flow_trees.push(tree);
+    }
+
+    let mut heads = Vec::<usize>::new();
+    let mut heads_index = HashMap::<usize, usize>::new();
+    let mut i = 0;
+    for tree in control_flow_trees.iter() {
+        heads.push(tree.id);
+        heads_index.insert(tree.id, i);
+        i += 1;
+    }
+
+    
+    let mut sink = HashSet::<usize>::new();
+    for tree in control_flow_trees.iter_mut() {
+        let root = tree.id;
+        let mut is_sink = true;
+        for parent in parents.iter() {
+            //check_sink_childs(root, &heads_index, childs, &mut is_sink);
+        }
+    }
+
+    heads_index
+    
+    /*
+    for tree in control_flow_trees.iter_mut() {
+        let root = tree.id;
+        if childs[&root].len() == 1 {
+            let mut cid = 0;
+            for c in childs[&root].iter() {
+                cid = *c;
+            }
+            if parents[&cid].len() == 1 {
+                tree.sink = Some(cid);
+                sink.insert(cid);
+            }
+        }
+    }
+    */
+
+    //let (topo, _topo) = topo_sort(cfg);
+    //println!("{:?}", _topo);
+
+    /*
+    println!("{:?}", parents);
+    println!("{:?}", childs);
+    println!("{:?}", heads);
+    */
+
+    //println!("{:#?}", control_flow_trees);
+}
+
+fn check_sink_childs(root: usize, heads_index: &HashMap<usize, usize>, childs: &HashMap<usize, Vec<usize>>, is_sink: &mut bool) {
+       
+}
+
+fn get_graph_slices(_graph: &Graph) -> (Vec<Graph>, HashMap<usize, Vec<usize>>, HashMap<usize, Vec<usize>>, HashMap<usize, usize>) {
+    let mut graph = _graph.clone();
+    let mut slices = Vec::<Graph>::new();
+
+    for pv in _graph.parents.iter() {
+        if pv.1.len() > 1 {
+            let to = pv.0;
+            let parents = pv.1.clone();
+
+            graph.parents.insert(to.clone(), Vec::new());
+            
+            for from in parents.iter() {
+                let edge = (from.clone(), to.clone());   
+                let i = get_key_from_value(&graph.edges, edge).unwrap();
+                graph.edges.remove(&i);
+
+                let child = graph.childs.entry(from.clone()).or_insert(Vec::new());
+                if let Some(i) = get_index_at_vec(&child, to.clone()) {
+                    child.remove(i);
+                }
+            }
+        } 
+    }
+
+    let mut marked = HashMap::<usize, bool>::new();
+    for v in _graph.vertexs.iter() {
+        marked.insert(*v, false);
+    }
+
+    let (topo, _topo) = graph_topo_sort(&graph);
+    let _heads = _topo[0].clone();
+    let (topo, _topo) = graph_topo_sort(_graph);
+
+    let mut heads = Vec::<usize>::new(); 
+    for t in topo {
+        if _heads.iter().any(|v| *v == t) {
+            heads.push(t);
+        }
+    }
+
+
+    /*
+    for head in heads.iter() {
+        let mut path = Vec::new();
+        graph_dfs(_graph, *head, &mut path);
+        for h in heads.iter() {
+            if *h != *head {
+                if path.iter().any(|v| *v == *h) {
+                    let child = childs.entry(*head).or_insert(HashSet::new());
+                    child.insert(*h);
+                    let parent = parents.entry(*h).or_insert(HashSet::new());
+                    parent.insert(*head);
+                }
+            }
+        }
+    }
+
+    for head in heads.iter() {
+        childs.entry(*head).or_insert(HashSet::new());
+        parents.entry(*head).or_insert(HashSet::new());
+    }
+    */
+
+    for head in heads {
+        let mut slice = Graph::new();
+        slice.root = head;
+        build_slice(&mut slice, &graph); 
+        //println!("{:#?}", slice);
+
+        slices.push(slice);
+    }
+
+    let mut belong = HashMap::<usize, usize>::new();
+    for vectex in _graph.vertexs.iter() {
+        for slice in slices.iter() {
+            let root = slice.root;
+            if slice.vertexs.iter().any(|v| *v == *vectex) {
+                belong.insert(*vectex, root);    
+            }
+        }
+    }
+
+    let mut _childs = HashMap::<usize, HashSet<usize>>::new();
+    let mut _parents = HashMap::<usize, HashSet<usize>>::new();
+
+    let mut childs = HashMap::<usize, Vec<usize>>::new();
+    let mut parents = HashMap::<usize, Vec<usize>>::new();
+
+    for slice in slices.iter() {
+        let cs = &_graph.childs;
+        let ps = &_graph.parents;
+        let root = slice.root;
+        let child = _childs.entry(root).or_insert(HashSet::new());
+        let parent = _parents.entry(root).or_insert(HashSet::new());
+        childs.entry(root).or_insert(Vec::new());
+        parents.entry(root).or_insert(Vec::new());
+
+        for v in slice.vertexs.iter() {
+            for c in cs[v].iter() {
+                if belong[c] != root {
+                    child.insert(belong[c]);
+                }
+            }
+
+            for p in ps[v].iter() {
+                if belong[p] != root {
+                    parent.insert(belong[p]);
+                }
+            }
+        }
+    }
+
+        
+    let (topo, _topo) = graph_topo_sort(_graph);
+    for v in topo.iter() {
+        for (k, set) in _childs.iter() {
+            if set.iter().any(|x| *x == *v) {
+                let mut child = childs.entry(*k).or_insert(Vec::new());
+                child.push(*v);
+            }  
+        }
+        for (k, set) in _parents.iter() {
+            if set.iter().any(|x| *x == *v) {
+                let mut parent = parents.entry(*k).or_insert(Vec::new());
+                parent.push(*v);
+            }  
+        }
+    }
+
+    /*
+    println!("-----------------------");
+    println!("{:?}", _parents);
+    println!("{:?}", parents);
+    println!("{:?}", _childs);
+    println!("{:?}", childs);
+    println!("-----------------------");
+    */
+
+    //println!("{:?}", parents);
+    //println!("{:?}", childs);
+    
+    (slices, parents, childs, belong)
+}
+
+fn build_slice(slice: &mut Graph, graph: &Graph) {
+    let root = slice.root;
+    let mut stack = Vec::<usize>::new(); 
+    stack.push(root);
+    let mut dfs = Vec::<usize>::new();
+    graph_dfs(graph, root, &mut dfs);
+    
+    for v in dfs.iter() {
+        slice.vertexs.insert(*v);
+        slice.childs.insert(*v, graph.childs[v].clone());
+        slice.parents.insert(*v, graph.parents[v].clone());
+    }
+
+    while !stack.is_empty() {
+        let v = stack.pop().unwrap();
+        
+        let from = v;
+        for c in slice.childs[&v].iter() {
+            let to = c.clone();
+            let e = (from, to);
+            let i = get_key_from_value(&graph.edges, e).unwrap();
+            slice.edges.insert(i, (from, to));
+            stack.push(*c);
+        }
+    }
+}
+
+fn graph_dfs(graph: &Graph, root: usize, dfs: &mut Vec<usize>) {
+    dfs.push(root);
+    for c in graph.childs[&root].iter() {
+        graph_dfs(graph, *c, dfs);
+    }
+}
+
+
+
+
+fn simplify(cfg: &ControlFlowGraph) -> Graph {
+    let mut graph = Graph::new(); 
+    for v in cfg.nodes.iter() {
+        graph.vertexs.insert(*v.0);
+        graph.childs.insert(*v.0, Vec::new());
+        graph.parents.insert(*v.0, Vec::new());
+    }
+
+    for e in cfg.edges.iter() {
+        let id = e.0;
+        let from = e.1.from;
+        let to = e.1.to;
+        graph.edges.insert(*id, (from, to));
+        let child = graph.childs.entry(from).or_insert(Vec::new());
+        child.push(to);
+        let parent = graph.parents.entry(to).or_insert(Vec::new());
+        parent.push(from);
+    }
+    graph
+}

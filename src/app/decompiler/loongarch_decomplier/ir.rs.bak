@@ -1,0 +1,614 @@
+use super::*;
+
+mod add_w;
+mod add_d;
+mod sub_w;
+mod sub_d;
+mod addi_w;
+mod addi_d;
+mod addu16i_d;
+mod alsl_w;
+mod alsl_wu;
+mod alsl_d;
+mod lu12i_w;
+mod lu32i_d;
+mod lu52i_d;
+mod slt;
+mod sltu;
+mod slti;
+mod sltui;
+mod pcaddi;
+mod pcaddu12i;
+mod pcaddu18i;
+mod pcalau12i;
+mod and;
+mod or;
+mod nor;
+mod xor;
+mod andn;
+mod orn;
+mod andi;
+mod ori;
+mod xori;
+mod mul_w;
+mod mul_d;
+mod mulh_w;
+mod mulh_d;
+mod mulh_wu;
+mod mulh_du;
+mod mulw_d_w;
+mod mulw_d_wu;
+mod div_w;
+mod div_d;
+mod div_wu;
+mod div_du;
+mod mod_w;
+mod mod_d;
+mod mod_wu;
+mod mod_du;
+mod sll_w;
+mod srl_w;
+mod sra_w;
+mod rotr_w;
+mod sll_d;
+mod srl_d;
+mod sra_d;
+mod rotr_d;
+mod slli_w;
+mod srli_w;
+mod srai_w;
+mod rotri_w;
+mod slli_d;
+mod srli_d;
+mod srai_d;
+mod rotri_d;
+mod beq;
+mod bne;
+mod blt;
+mod bltu;
+mod bge;
+mod bgeu;
+mod beqz;
+mod bnez;
+mod b;
+mod bl;
+mod jirl;
+mod ld_b;
+mod ld_h;
+mod ld_w;
+mod ld_d;
+mod ld_bu;
+mod ld_hu;
+mod ld_wu;
+mod st_b;
+mod st_h;
+mod st_w;
+mod st_d;
+mod ldx_b;
+mod ldx_h;
+mod ldx_w;
+mod ldx_d;
+mod ldx_bu;
+mod ldx_hu;
+mod ldx_wu;
+mod stx_b;
+mod stx_h;
+mod stx_w;
+mod stx_d;
+mod ldptr_w;
+mod ldptr_d;
+mod stptr_w;
+mod stptr_d;
+
+
+use add_w::*;
+use add_d::*;
+use sub_w::*;
+use sub_d::*;
+use addi_w::*;
+use addi_d::*;
+use addu16i_d::*;
+use alsl_w::*;
+use alsl_wu::*;
+use alsl_d::*;
+use lu12i_w::*;
+use lu32i_d::*;
+use lu52i_d::*;
+use slt::*;
+use sltu::*;
+use slti::*;
+use sltui::*;
+use pcaddi::*;
+use pcaddu12i::*;
+use pcaddu18i::*;
+use pcalau12i::*;
+use and::*;
+use or::*;
+use nor::*;
+use xor::*;
+use andn::*;
+use orn::*;
+use andi::*;
+use ori::*;
+use xori::*;
+use mul_w::*;
+use mul_d::*;
+use mulh_w::*;
+use mulh_d::*;
+use mulh_wu::*;
+use mulh_du::*;
+use mulw_d_w::*;
+use mulw_d_wu::*;
+use div_w::*;
+use div_d::*;
+use div_wu::*;
+use div_du::*;
+use mod_w::*;
+use mod_d::*;
+use mod_wu::*;
+use mod_du::*;
+use sll_w::*;
+use srl_w::*;
+use sra_w::*;
+use rotr_w::*;
+use sll_d::*;
+use srl_d::*;
+use sra_d::*;
+use rotr_d::*;
+use slli_w::*;
+use srli_w::*;
+use srai_w::*;
+use rotri_w::*;
+use slli_d::*;
+use srli_d::*;
+use srai_d::*;
+use rotri_d::*;
+use beq::*;
+use bne::*;
+use blt::*;
+use bltu::*;
+use bge::*;
+use bgeu::*;
+use beqz::*;
+use bnez::*;
+use b::*;
+use bl::*;
+use jirl::*;
+use ld_b::*;
+use ld_h::*;
+use ld_w::*;
+use ld_d::*;
+use ld_bu::*;
+use ld_hu::*;
+use ld_wu::*;
+use st_b::*;
+use st_h::*;
+use st_w::*;
+use st_d::*;
+use ldx_b::*;
+use ldx_h::*;
+use ldx_w::*;
+use ldx_d::*;
+use ldx_bu::*;
+use ldx_hu::*;
+use ldx_wu::*;
+use stx_b::*;
+use stx_h::*;
+use stx_w::*;
+use stx_d::*;
+use ldptr_w::*;
+use ldptr_d::*;
+use stptr_w::*;
+use stptr_d::*;
+
+#[derive(Debug, Clone)]
+pub struct Ir {
+    pub address: Option<usize>,
+    pub opcode: IrOpcode,
+    pub operand1: IrOperand,
+    pub operand2: IrOperand,
+    pub operand3: IrOperand,
+}
+
+#[derive(Debug, Clone)]
+pub enum IrOperand {
+    Reg(Register),
+    Imm(Immediate),
+    Cond(Condiction),
+    Off(Offset),
+    None,
+}
+
+#[derive(Debug, Clone)]
+pub struct Register {
+    register: pre::Register,
+    size: u8,
+    signed: Option<bool>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Immediate {
+    pub value: isize,
+    pub size: u8,
+    pub signed: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct Condiction {
+    pub relation: Relation,
+    pub cond_operand1: CondOeprand,
+    pub cond_operand2: CondOeprand,
+}
+
+#[derive(Debug, Clone)]
+pub enum Relation {
+    Equal,
+    Less,
+    LessEqual,
+}
+
+#[derive(Debug, Clone)]
+pub enum CondOeprand {
+    Reg(Register),
+    Imm(Immediate),
+    None,
+}
+
+#[derive(Debug, Clone)]
+pub struct Offset {
+    value: isize,
+    symbol: Option<SymbolRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum IrOpcode {
+    ADD,
+    SUB,
+    SLL,
+    SRL,
+    SRA,
+    SignExtend(u8, u8),
+    ZeroExtend(u8, u8),
+    ASGN,
+    SLT,
+    SLTU,
+    AND,
+    OR,
+    XOR,
+    NOT,
+    MUL,
+    DIV,
+    MOD,
+    BL,
+    JMP,
+    JCC,
+    JIRL,
+    LOAD,
+    STORE,
+    None, 
+}
+
+pub fn analyse_ir_from_function_block(instructions: Vec<AssemblyInstruction>) -> Vec<Ir> {
+    let mut irs = Vec::<Ir>::new();
+    
+    for insn in instructions {
+        match insn.opcode {
+            Opcode::ADD_W => add_w(insn, &mut irs),
+            Opcode::ADD_D => add_d(insn, &mut irs),
+            Opcode::SUB_W => sub_w(insn, &mut irs),
+            Opcode::SUB_D => sub_d(insn, &mut irs),
+            Opcode::ADDI_W => addi_w(insn, &mut irs),
+            Opcode::ADDI_D => addi_d(insn, &mut irs),
+            Opcode::ADDU16I_D => addu16i_d(insn, &mut irs),
+            Opcode::ALSL_W => alsl_w(insn, &mut irs),
+            Opcode::ALSL_WU => alsl_wu(insn, &mut irs),
+            Opcode::ALSL_D => alsl_d(insn, &mut irs),
+            Opcode::LU12I_W => lu12i_w(insn, &mut irs),
+            Opcode::LU32I_D => lu32i_d(insn, &mut irs),
+            Opcode::LU52I_D => lu52i_d(insn, &mut irs),
+            Opcode::SLT => slt(insn, &mut irs),
+            Opcode::SLTU => slt(insn, &mut irs),
+            Opcode::SLTI => slti(insn, &mut irs),
+            Opcode::SLTUI => sltui(insn, &mut irs),
+            Opcode::PCADDI => pcaddi(insn, &mut irs),
+            Opcode::PCADDU12I => pcaddu12i(insn, &mut irs),
+            Opcode::PCADDU18I => pcaddu18i(insn, &mut irs),
+            Opcode::PCALAU12I => pcalau12i(insn, &mut irs),
+            Opcode::AND => and(insn, &mut irs),
+            Opcode::OR => or(insn, &mut irs),
+            Opcode::NOR => nor(insn, &mut irs),
+            Opcode::XOR => xor(insn, &mut irs),
+            Opcode::ANDN => andn(insn, &mut irs),
+            Opcode::ORN => orn(insn, &mut irs),
+            Opcode::ANDI => andi(insn, &mut irs),
+            Opcode::ORI => ori(insn, &mut irs),
+            Opcode::XORI => xori(insn, &mut irs),
+            Opcode::MUL_W => mul_w(insn, &mut irs),
+            Opcode::MUL_D => mul_d(insn, &mut irs),
+            Opcode::MULH_W => mulh_w(insn, &mut irs),
+            Opcode::MULH_D => mulh_d(insn, &mut irs),
+            Opcode::MULH_WU => mulh_wu(insn, &mut irs),
+            Opcode::MULH_DU => mulh_du(insn, &mut irs),
+            Opcode::DIV_W => div_w(insn, &mut irs),
+            Opcode::DIV_D => div_d(insn, &mut irs),
+            Opcode::DIV_WU => div_wu(insn, &mut irs),
+            Opcode::DIV_DU => div_du(insn, &mut irs),
+            Opcode::MOD_W => mod_w(insn, &mut irs),
+            Opcode::MOD_D => mod_d(insn, &mut irs),
+            Opcode::MOD_WU => mod_wu(insn, &mut irs),
+            Opcode::MOD_DU => mod_du(insn, &mut irs),
+            Opcode::SLL_W => sll_w(insn, &mut irs),
+            Opcode::SRL_W => srl_w(insn, &mut irs),
+            Opcode::SRA_W => sra_w(insn, &mut irs),
+            Opcode::SLL_D => sll_d(insn, &mut irs),
+            Opcode::SRL_D => srl_d(insn, &mut irs),
+            Opcode::SRA_D => sra_d(insn, &mut irs),
+            Opcode::SLLI_W => slli_w(insn, &mut irs),
+            Opcode::SRLI_W => srli_w(insn, &mut irs),
+            Opcode::SRAI_W => srai_w(insn, &mut irs),
+            Opcode::SLLI_D => slli_d(insn, &mut irs),
+            Opcode::SRLI_D => srli_d(insn, &mut irs),
+            Opcode::SRAI_D => srai_d(insn, &mut irs),
+            Opcode::BEQ => beq(insn, &mut irs),
+            Opcode::BNE => bne(insn, &mut irs),
+            Opcode::BLT => blt(insn, &mut irs),
+            Opcode::BGE => bge(insn, &mut irs),
+            Opcode::BLTU => bltu(insn, &mut irs),
+            Opcode::BGEU => bgeu(insn, &mut irs),
+            Opcode::BEQZ => beqz(insn, &mut irs),
+            Opcode::BNEZ => bnez(insn, &mut irs),
+            Opcode::B => b(insn, &mut irs),
+            Opcode::BL => bl(insn, &mut irs),
+            Opcode::JIRL => jirl(insn, &mut irs),
+            Opcode::LD_B => ld_b(insn, &mut irs),
+            Opcode::LD_H => ld_h(insn, &mut irs),
+            Opcode::LD_W => ld_w(insn, &mut irs),
+            Opcode::LD_D => ld_d(insn, &mut irs),
+            Opcode::LD_BU => ld_bu(insn, &mut irs),
+            Opcode::LD_HU => ld_hu(insn, &mut irs),
+            Opcode::LD_WU => ld_wu(insn, &mut irs),
+            Opcode::ST_B => st_b(insn, &mut irs),
+            Opcode::ST_H => st_h(insn, &mut irs),
+            Opcode::ST_W => st_w(insn, &mut irs),
+            Opcode::ST_D => st_d(insn, &mut irs),
+            Opcode::LDX_B => ldx_d(insn, &mut irs),
+            Opcode::LDX_H => ldx_h(insn, &mut irs),
+            Opcode::LDX_W => ldx_w(insn, &mut irs),
+            Opcode::LDX_D => ldx_d(insn, &mut irs),
+            Opcode::LDX_BU => ldx_bu(insn, &mut irs),
+            Opcode::LDX_HU => ldx_hu(insn, &mut irs),
+            Opcode::LDX_WU => ldx_wu(insn, &mut irs),
+            Opcode::STX_B => stx_b(insn, &mut irs),
+            Opcode::STX_H => stx_h(insn, &mut irs),
+            Opcode::STX_W => stx_w(insn, &mut irs),
+            Opcode::STX_D => stx_d(insn, &mut irs),
+            Opcode::LDPTR_W => ldptr_w(insn, &mut irs),
+            Opcode::LDPTR_D => ldptr_d(insn, &mut irs),
+            Opcode::STPTR_W => stptr_w(insn, &mut irs),
+            Opcode::STPTR_D => stptr_w(insn, &mut irs),
+            
+
+
+            _ => {
+                println!("{:#?}", insn);
+                irs.push(Ir::new())
+            }
+        }
+        // match insn.opcode
+        
+    }
+    // for insn in &instructions
+
+    for ir in &irs {
+        if ir.opcode != IrOpcode::None {
+            //println!("{:#?}", ir);
+        }
+    }
+
+    for ir in &irs {
+        if ir.opcode != IrOpcode::None {
+            println!("{}", ir);
+        }
+    }
+
+    for ir in &irs {
+        if ir.opcode == IrOpcode::None {
+            //println!("{:?}", ir);
+        }
+    }
+
+
+    irs
+}
+
+impl Ir {
+    pub fn new() -> Self {
+        Ir {
+            address: None,
+            opcode: IrOpcode::None,
+            operand1: IrOperand::None,
+            operand2: IrOperand::None,
+            operand3: IrOperand::None,
+        }
+    }
+
+    pub fn from(address: Option<usize>, opcode: IrOpcode, operand1: IrOperand, operand2: IrOperand, operand3: IrOperand) -> Self {
+        Ir {
+            address,
+            opcode,
+            operand1,
+            operand2,
+            operand3,
+        } 
+    }
+}
+
+
+impl Register {
+    pub fn from(register: pre::Register, size: u8, signed: Option<bool>) -> Self {
+        Register {
+            register,
+            size,
+            signed,
+        }
+    }
+}
+
+impl Immediate {
+    pub fn from(value: isize, size: u8, signed: bool) -> Self {
+        Immediate {
+            value,
+            size,
+            signed,
+        }
+    }
+}
+
+impl Offset {
+    pub fn from(value: isize, symbol: Option<SymbolRecord>) -> Self {
+        Offset {
+            value,
+            symbol,
+        }
+    }
+}
+
+impl Condiction {
+    pub fn from(relation: Relation, cond_operand1: CondOeprand, cond_operand2: CondOeprand) -> Self {
+        Condiction {
+            relation,
+            cond_operand1,
+            cond_operand2,
+        }
+    }
+}
+
+
+impl fmt::Display for Ir {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.address {
+            Some(address) => write!(f, "0x{:<08x}\t", address),
+            None => write!(f, "          \t"),
+        };
+
+        match self.opcode {
+            IrOpcode::ADD => write!(f, "add"),
+            IrOpcode::SUB => write!(f, "sub"),
+            IrOpcode::SLL => write!(f, "sll"),
+            IrOpcode::SRL => write!(f, "srl"),
+            IrOpcode::SRA => write!(f, "sra"),
+            IrOpcode::SignExtend(a, b) => write!(f, "signed.extend({},{})", a, b),
+            IrOpcode::ZeroExtend(a, b) => write!(f, "zere.extand({},{})", a, b),
+            IrOpcode::ASGN => write!(f, "asgn"),
+            IrOpcode::SLT => write!(f, "slt"),
+            IrOpcode::SLTU => write!(f, "sltu"),
+            IrOpcode::AND => write!(f, "and"),
+            IrOpcode::OR => write!(f, "or"),
+            IrOpcode::XOR => write!(f, "xor"),
+            IrOpcode::NOT => write!(f, "not"),
+            IrOpcode::MUL => write!(f, "mul"),
+            IrOpcode::DIV => write!(f, "div"),
+            IrOpcode::MOD => write!(f, "mod"),
+            IrOpcode::BL => write!(f, "bl"),
+            IrOpcode::JMP => write!(f, "jmp"),
+            IrOpcode::JCC => write!(f, "jcc"),
+            IrOpcode::JIRL => write!(f, "jirl"),
+            IrOpcode::LOAD => write!(f, "load"),
+            IrOpcode::STORE => write!(f, "store"),
+            IrOpcode::None => write!(f, "none"), 
+        };
+
+        write!(f, "\t");
+        write!(f, "{}", display_operand(&self.operand1));  
+
+        write!(f, "\t");
+        write!(f, "{}", display_operand(&self.operand2));
+
+        write!(f, "\t");
+        write!(f, "{}", display_operand(&self.operand3));
+        
+    
+        write!(f, "")
+    }
+}
+
+fn display_operand(operand: &IrOperand) -> String {
+    let mut s = String::new();
+    match operand {
+        IrOperand::Reg(register) => {
+            match &register.register {
+                super::Register::GR(r) => {
+                    s += &format!("$r{}", r);                
+                }
+
+                super::Register::FR(r) => {
+                    s += &format!("$f{}", r);
+                }
+            }
+
+            if register.size == 32 {
+                s += &format!("[31:0]");
+            } else if register.size == 64 {
+                s += &format!("[63:0]");
+            }
+        }
+
+        IrOperand::Imm(immediate) => {
+            if immediate.signed {
+                s += &format!("{}", immediate.value);
+            } else {
+                s += &format!("{}", immediate.value as usize);
+            }
+        }
+
+        IrOperand::Off(offset) => {
+            s += &format!("{}", offset.value);
+        }
+
+        IrOperand::Cond(condiction) => {
+            match &condiction.cond_operand1 {
+                CondOeprand::Reg(reg) => {
+                    match reg.register {
+                        super::Register::GR(r) => {
+                            s += &format!("$r{}", r);                
+                     }
+
+                        super::Register::FR(r) => {
+                            s += &format!("$f{}", r);
+                        }
+                    }
+                }
+                CondOeprand::Imm(imm) => s += &format!("{}", imm.value),
+                CondOeprand::None => {}
+            }
+            match &condiction.relation {
+                ir::Relation::Less => s += &format!(" < "),
+                ir::Relation::Equal => s += &format!(" = "),
+                ir::Relation::LessEqual => s += &format!(" <= "),
+            }
+             
+            match &condiction.cond_operand2 {
+                CondOeprand::Reg(reg) => {
+                    match reg.register {
+                        super::Register::GR(r) => {
+                            s += &format!("$r{}", r);                
+                     }
+
+                        super::Register::FR(r) => {
+                            s += &format!("$f{}", r);
+                        }
+                    }
+                }
+                CondOeprand::Imm(imm) => s += &format!("{}", imm.value),
+                CondOeprand::None => {}
+            }
+       
+        }
+
+        IrOperand::None => {
+
+        }
+    }
+
+    s
+} 

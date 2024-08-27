@@ -1,0 +1,690 @@
+
+// 2R 22
+const CLO_W: usize = 4;
+const CLZ_W: usize = 5;
+const CTO_W: usize = 6;
+const CTZ_W: usize = 7;
+const CLO_D: usize = 8;
+const CLZ_D: usize = 9;
+const CTO_D: usize = 10;
+const CTZ_D: usize = 11;
+const REVB_2H: usize = 12;
+const REVB_4H: usize = 13;
+const REVB_2W: usize = 14;
+const REVB_D: usize = 15;
+const REVH_2W: usize = 16;
+const REVH_D: usize = 17;
+const BITREV_4B: usize = 18;
+const BITREV_8B: usize = 19;
+const BITREV_W: usize = 20;
+const BITREV_D: usize = 21;
+const EXT_W_H: usize = 22;
+const EXT_W_B: usize = 23;
+const RDTIMEL_W: usize = 24;
+const RDTIMEH_W: usize = 25;
+const RDTIME_D: usize = 26;
+const CPUCFG: usize = 27;
+const FSQRT_S: usize = 17681;
+const FSQRT_D: usize = 17682;
+const FRECIP_S: usize = 17683;
+const FRECIP_D: usize = 17684; 
+const FRSQRT_S: usize = 17689; 
+const FRSQRT_D: usize = 17690; 
+const FMOV_S: usize = 17701;
+const FMOV_D: usize = 17702;
+const MOVGR2FR_W: usize = 17705;
+const MOVGR2FR_D: usize = 17706;
+const MOVGR2FRH_W: usize = 17707; 
+const MOVFR2GR_S: usize = 17709;
+const MOVFR2GR_D: usize = 17710;
+const MOVFRH2GR_S: usize = 17711;
+const MOVGR2FCSR: usize = 17712;
+const MOVFCSR2GR: usize = 17714;
+const MOVFR2CF: usize = 17716; 
+const MOVCF2FR: usize = 17717; 
+const MOVGR2CF: usize = 17718; 
+const MOVCF2GR: usize = 17719; 
+const FCVT_S_D: usize = 17990; 
+const FCVT_D_S: usize = 17993; 
+const FTINTRM_W_S: usize = 18049;
+const FTINTRM_W_D: usize = 18050;
+const FTINTRM_L_S: usize = 18057;
+const FTINTRM_L_D: usize = 18058;
+const FTINTRP_W_S: usize = 18065;
+const FTINTRP_W_D: usize = 18066;
+const FTINTRP_L_S: usize = 18073;
+const FTINTRP_L_D: usize = 18074;
+const FTINTRZ_W_S: usize = 18081;
+const FTINTRZ_W_D: usize = 18082;
+const FTINTRZ_L_S: usize = 18089;
+const FTINTRZ_L_D: usize = 18090;
+const FTINTRNE_W_S: usize = 18097;
+const FTINTRNE_W_D: usize = 18098;
+const FTINTRNE_L_S: usize = 18105;
+const FTINTRNE_L_D: usize = 18106;
+const FTINT_W_S: usize = 18113;
+const FTINT_W_D: usize = 18114;
+const FTINT_L_S: usize = 18121;
+const FTINT_L_D: usize = 18122;
+const FFINT_S_W: usize = 18244;
+const FFINT_S_L: usize = 18246;
+const FFINT_D_W: usize = 18248;
+const FFINT_D_L: usize = 18250;
+const FFINT_S: usize = 18321;
+const FRINT_D: usize = 18322;
+const IOCSRRD_B: usize = 102912;
+const IOCSRRD_H: usize = 102913;
+const IOCSRRD_W: usize = 102914;
+const IOCSRRD_D: usize = 102915;
+const IOCSRWR_B: usize = 102916;
+const IOCSRWR_H: usize = 102917;
+const IOCSRWR_W: usize = 102918;
+const IOCSRWR_D: usize = 102919;
+const TLBCLR: usize = 102920;
+const TLBFLUSH: usize = 102921;
+const TLBSRCH: usize = 102922; 
+const TLBRD: usize = 102923; 
+const TLBWR: usize = 102924; 
+const TLBFILL: usize = 102925; 
+const ERTN: usize = 102926;
+const FABS_S: usize = 17665; 
+const FABS_D: usize = 17666; 
+const FNEG_S: usize = 17669; 
+const FNEG_D: usize = 17670; 
+const FLOGB_S: usize = 17673;
+const FLOGB_D: usize = 17674;
+const FCLASS_S: usize = 17677;
+const FCLASS_D: usize = 17678;
+
+// 3R 17
+const ASRTLE_D: usize = 2;
+const ASRTGT_D: usize = 3;
+const ADD_W: usize = 32;
+const ADD_D: usize = 33;
+const SUB_W: usize = 34;
+const SUB_D: usize = 35;
+const SLT: usize = 36;
+const SLTU: usize = 37;
+const MASKEQZ: usize = 38;
+const MASKNEZ: usize = 39;
+const NOR: usize = 40;
+const AND: usize = 41;
+const OR: usize = 42;
+const XOR: usize = 43;
+const ORN: usize = 44;
+const ANDN: usize = 45;
+const SLL_W: usize = 46;
+const SRL_W: usize = 47;
+const SRA_W: usize = 48;
+const SLL_D: usize = 49;
+const SRL_D: usize = 50;
+const SRA_D: usize = 51;
+const ROTR_W: usize = 54; 
+const ROTR_D: usize = 55; 
+const MUL_W: usize = 56;
+const MULH_W: usize = 57; 
+const MULH_WU: usize = 58;
+const MUL_D: usize = 59;
+const MULH_D: usize = 60; 
+const MULH_DU: usize = 61;
+const MULW_D_W: usize = 62;
+const MULW_D_WU: usize = 63;
+const DIV_W: usize = 64;
+const MOD_W: usize = 65;
+const DIV_WU: usize = 66; 
+const MOD_WU: usize = 67; 
+const DIV_D: usize = 68;
+const MOD_D: usize = 69;
+const DIV_DU: usize = 70; 
+const MOD_DU: usize = 71; 
+const CRC_W_B_W: usize = 72;
+const CRC_W_H_W: usize = 73;
+const CRC_W_W_W: usize = 74;
+const CRC_W_D_W: usize = 75;
+const CRCC_W_B_W: usize = 76;
+const CRCC_W_H_W: usize = 77;
+const CRCC_W_W_W: usize = 78;
+const CRCC_W_D_W: usize = 79;
+const BREAK: usize = 84;
+const DBCL: usize = 85;
+const SYSCALL: usize = 86;
+const FADD_S: usize = 513;
+const FADD_D: usize = 514;
+const FSUB_S: usize = 517;
+const FSUB_D: usize = 518;
+const FMUL_S: usize = 521;
+const FMUL_D: usize = 522;
+const FDIV_S: usize = 526;
+const FDIV_D: usize = 527;
+const FMAX_S: usize = 529;
+const FMAX_D: usize = 530;
+const FMIN_S: usize = 533;
+const FMIN_D: usize = 534;
+const FMAXA_S: usize = 537;
+const FMAXA_D: usize = 538;
+const FMINA_S: usize = 541;
+const FMINA_D: usize = 542;
+const FSCALEB_S: usize = 545;
+const FSCALEB_D: usize = 546;
+const FCOPYSIGN_S: usize = 549;
+const FCOPYSIGN_D: usize = 550;
+const IDLE: usize = 3217;
+const INVTLD: usize = 3219;
+const LDX_B: usize = 28672;
+const LDX_W: usize = 28680;
+const LDX_D: usize = 28696;
+const STX_B: usize = 28704;
+const STX_H: usize = 28712;
+const STX_W: usize = 28720;
+const STX_D: usize = 28728;
+const LDX_BU: usize = 28736;
+const LDX_HU: usize = 28744;
+const LDX_WU: usize = 28752;
+const PRELDX: usize = 28760;
+const FLDX_S: usize = 28768; 
+const FLDX_D: usize = 28776; 
+const FSTX_S: usize = 28784; 
+const FSTX_D: usize = 28792; 
+const AMSWAP_W: usize = 28864;
+const AMSWAP_D: usize = 28865;
+const AMADD_W: usize = 28866; 
+const AMADD_D: usize = 28867; 
+const AMAND_W: usize = 28868; 
+const AMAND_D: usize = 28869; 
+const AMOR_W: usize = 28870; 
+const AMOR_D: usize = 28871; 
+const AMXOR_W: usize = 28872; 
+const AMXOR_D: usize = 28873; 
+const AMMAX_W: usize = 28874; 
+const AMMAX_D: usize = 28875; 
+const AMMIN_W: usize = 28876; 
+const AMMIN_D: usize = 28877; 
+const AMMAX_WU: usize = 28878;
+const AMMAX_DU: usize = 28879;
+const AMMIN_WU: usize = 28880;
+const AMMIN_DU: usize = 28881;
+const AMSWAP_DB_W: usize = 28882;
+const AMSWAP_DB_D: usize = 28883;
+const AMADD_DB_W: usize = 28884;
+const AMADD_DB_D: usize = 28885;
+const AMAND_DB_W: usize = 28886;
+const AMAND_DB_D: usize = 28887;
+const AMOR_DB_W: usize = 28888;
+const AMOR_DB_D: usize = 28889;
+const AMXOR_DB_W: usize = 28890;
+const AMXOR_DB_D: usize = 28891;
+const AMMAX_DB_W: usize = 28892;
+const AMMAX_DB_D: usize = 28893;
+const AMMIN_DB_W: usize = 28894;
+const AMMIN_DB_D: usize = 28895;                  
+const AMMAX_DB_WU: usize = 28896;                   
+const AMMAX_DB_DU: usize = 28897;                   
+const AMMIN_DB_WU: usize = 28898;                   
+const AMMIN_DB_DU: usize = 28899;                  
+const DBAR: usize = 28900;                
+const IBAR: usize = 28901;                
+const FLDGT_S: usize = 28904;                  
+const FLDGT_D: usize = 28905;                  
+const FLDLE_S: usize = 28906;                  
+const FLDLE_D: usize = 28907;                  
+const FSTGT_S: usize = 28908;                  
+const FSTGT_D: usize = 28909;                  
+const FSTLE_S: usize = 28910;                  
+const FSTLE_D: usize = 28911;                  
+const LDGT_B: usize = 28912;                  
+const LDGT_H: usize = 28913;                  
+const LDGT_W: usize = 28914;                  
+const LDGT_D: usize = 28915;                  
+const LDLE_B: usize = 28916;                  
+const LDLE_H: usize = 28917;                  
+const LDLE_W: usize = 28918;                  
+const LDLE_D: usize = 28919;                  
+const STGT_B: usize = 28920;                  
+const STGT_H: usize = 28921;                  
+const STGT_W: usize = 28922;                  
+const STGT_D: usize = 28923;                  
+const STLE_B: usize = 28924;                  
+const STLE_H: usize = 28925;                  
+const STLE_W: usize = 28926;                  
+const STLE_D: usize = 28927;                  
+
+// 4R 12
+const FMADD_S: usize = 129;              
+const FMADD_D: usize = 130;              
+const FMSUB_S: usize = 133;              
+const FMSUB_D: usize = 134;              
+const FNMADD_S: usize = 137;              
+const FNMADD_D: usize = 138;              
+const FNMSUB_S: usize = 141;              
+const FNMSUB_D: usize = 142;              
+const FCMP_cond_S: usize = 193;              
+const FCMP_cond_D: usize = 194;              
+const FSEL: usize = 208;                
+
+// 2RI8 14
+const ALSL_W: usize = 1;  
+const ALSL_WU: usize = 1; 
+const BYTEPICK_W: usize = 2; 
+const BYTEPICK_D: usize = 3; 
+const ALSL_D: usize = 11;                 
+const SLLI_W: usize = 16;                  
+const SLLI_D: usize = 16;                 
+const SRLI_W: usize = 17;                  
+const SRLI_D: usize = 17;                 
+const SRAI_W: usize = 18;                  
+const SRAI_D: usize = 18;                 
+const ROTRI_W: usize = 19;                  
+const ROTRI_D: usize = 19;                 
+const LDDIR: usize = 400;               
+const LDPTE: usize = 401;                  
+
+// 2RI12 10
+const BSTRINS_W: usize = 1;             
+const BSTRPICK_W: usize = 1;             
+const BSTRINS_D: usize = 2;            
+const BSTRPICK_D: usize = 3;            
+const SLTI: usize = 8;           
+const SLTUI: usize = 9;           
+const ADDI_W: usize = 10;           
+const ADDI_D: usize = 11;           
+const LU52I_D: usize = 12;           
+const ANDI: usize = 13;           
+const ORI: usize = 14;           
+const XORI: usize = 15;           
+const CACOP: usize = 24;           
+const LD_B: usize = 160;           
+const LD_H: usize = 161;        
+const LD_W: usize = 162;           
+const LD_D: usize = 163;           
+const ST_B: usize = 164;           
+const ST_H: usize = 165;           
+const ST_W: usize = 166;           
+const ST_D: usize = 167;           
+const LD_BU: usize = 168;           
+const LD_HU: usize = 169;           
+const LD_WU: usize = 170;           
+const PRELD: usize = 171;           
+const FLD_S: usize = 172;           
+const FST_S: usize = 173;           
+const FLD_D: usize = 174;           
+const FST_D: usize =175;           
+
+// 2RI14 8
+const CSRRD: usize = 4;            
+const CSRWR: usize = 4;            
+const CSRXCHG: usize = 4;
+const LL_W: usize = 32;         
+const SC_W: usize = 33;         
+const LL_D: usize = 34;         
+const SC_D: usize = 35;         
+const LDPTR_W: usize = 36;         
+const STPTR_W: usize = 37;         
+const LDPTR_D: usize = 38;         
+const STPTR_D: usize = 39;         
+
+// 2RI16 6
+const ADDU16I_D: usize = 4;
+const JIRL: usize = 19;       
+const BEQ: usize = 22;       
+const BNE: usize = 23;       
+const BLT: usize = 24;       
+const BGE: usize = 25;       
+const BLTU: usize = 26;       
+const BGEU: usize = 27;       
+
+// 1RI21 6
+const BEQZ: usize = 16;      
+const BNEZ: usize = 17;      
+const BCEQZ: usize = 18;       
+const BCNEZ: usize = 18;       
+
+
+// I26 6
+const B: usize = 20;     
+const BL: usize = 21;     
+
+
+// 1RI20 7
+const LU12I_W: usize = 10;       
+const LU32I_D: usize = 11;       
+const PCADDI: usize = 12;       
+const PCALAU12I: usize = 13;       
+const PCADDU12I: usize = 14;       
+const PCADDU18I: usize = 15;       
+
+
+
+pub enum Opcode {
+	CLO_W,
+	CLZ_W,
+	CTO_W,
+	CTZ_W,
+	CLO_D,
+	CLZ_D,
+	CTO_D,
+	CTZ_D,
+	REVB_2H,
+	REVB_4H,
+	REVB_2W,
+	REVB_D,
+	REVH_2W,
+	REVH_D,
+	BITREV_4B,
+	BITREV_8B,
+	BITREV_W,
+	BITREV_D,
+	EXT_W_H,
+	EXT_W_B,
+	RDTIMEL_W,
+	RDTIMEH_W,
+	RDTIME_D,
+	CPUCFG,
+	ASRTLE_D,
+	ASRTGT_D,
+	ALSL_W,
+	ALSL_WU,
+	BYTEPICK_W,
+	BYTEPICK_D,
+	ADD_W,
+	ADD_D,
+	SUB_W,
+	SUB_D,
+	SLT,
+	SLTU,
+	MASKEQZ,
+	MASKNEZ,
+	NOR,
+	AND,
+	OR,
+	XOR,
+	ORN,
+	ANDN,
+	SLL_W,
+	SRL_W,
+	SRA_W,
+	SLL_D,
+	SRL_D,
+	SRA_D,
+	ROTR_W,
+	ROTR_D,
+	MUL_W,
+	MULH_W,
+	MULH_WU,
+	MUL_D,
+	MULH_D,
+	MULH_DU,
+	MULW_D_W,
+	MULW_D_WU,
+	DIV_W,
+	MOD_W,
+	DIV_WU,
+	MOD_WU,
+	DIV_D,
+	MOD_D,
+	DIV_DU,
+	MOD_DU,
+	CRC_W_B_W,
+	CRC_W_H_W,
+	CRC_W_W_W,
+	CRC_W_D_W,
+	CRCC_W_B_W,
+	CRCC_W_H_W,
+	CRCC_W_W_W,
+	CRCC_W_D_W,
+	BREAK,
+	DBCL,
+	SYSCALL,
+	ALSL_D,
+	SLLI_W,
+	SLLI_D,
+	SRLI_W,
+	SRLI_D,
+	SRAI_W,
+	SRAI_D,
+	ROTRI_W,
+	ROTRI_D,
+	BSTRINS_W,
+	BSTRPICK_W,
+	BSTRINS_D,
+	BSTRPICK_D,
+	FADD_S,
+	FADD_D,
+	FSUB_S,
+	FSUB_D,
+	FMUL_S,
+	FMUL_D,
+	FDIV_S,
+	FDIV_D,
+	FMAX_S,
+	FMAX_D,
+	FMIN_S,
+	FMIN_D,
+	FMAXA_S,
+	FMAXA_D,
+	FMINA_S,
+	FMINA_D,
+	FSCALEB_S,
+	FSCALEB_D,
+	FCOPYSIGN_S,
+	FCOPYSIGN_D,
+	FABS_S,
+	FABS_D,
+	FNEG_S,
+	FNEG_D,
+	FLOGB_S,
+	FLOGB_D,
+	FCLASS_S,
+	FCLASS_D,
+	FSQRT_S,
+	FSQRT_D,
+	FRECIP_S,
+	FRECIP_D,
+	FRSQRT_S,
+	FRSQRT_D,
+	FMOV_S,
+	FMOV_D,
+	MOVGR2FR_W,
+	MOVGR2FR_D,
+	MOVGR2FRH_W,
+	MOVFR2GR_S,
+	MOVFR2GR_D,
+	MOVFRH2GR_S,
+	MOVGRF2CSR,
+	MOVFCSR2GR,
+	MOVFR2CF,
+	MOVCF2FR,
+	MOVGR2CF,
+	MOVCF2GR,
+	FCVT_S_D,
+	FCVT_D_S,
+	FTINTRM_W_S,
+	FTINTRM_W_D,
+	FTINTRM_L_S,
+	FTINTRM_L_D,
+	FTINTRP_W_S,
+	FTINTRP_W_D,
+	FTINTRP_L_S,
+	FTINTRP_L_D,
+	FTINTRZ_W_S,
+	FTINTRZ_W_D,
+	FTINTRZ_L_S,
+	FTINTRZ_L_D,
+	FTINTRNE_W_S,
+	FTINTRNE_W_D,
+	FTINTRNE_L_S,
+	FTINTRNE_L_D,
+	FTINT_W_S,
+	FTINT_W_D,
+	FTINT_L_S,
+	FTINT_L_D,
+	FFINT_S_W,
+	FFINT_S_L,
+	FFINT_D_W,
+	FFINT_D_L,
+	FRINT_S,
+	FRINT_D,
+	SLTI,
+	SLTUI,
+	ADDI_W,
+	ADDI_D,
+	LUI_D,
+	ANDI,
+	ORI,
+	XORI,
+	CSRRD,
+	CSRWR,
+	CSRXCHG,
+	CACOP,
+	LDDIR,
+	LDPTE,
+	IOCSRRD_B,
+	IOCSRRD_H,
+	IOCSRRD_W,
+	IOCSRRD_D,
+	IOCSRWR_B,
+	IOCSRWR_H,
+	IOCSRWR_W,
+	IOCSRWR_D,
+	TLBCLR,
+	TLBFLUSH,
+	TLBSRCH,
+	TLBRD,
+	TLBWR,
+	TLBFILL,
+	ERTN,
+	IDLE,
+	INVTLB,
+	FMADD_S,
+	FMADD_D,
+	FMSUB_S,
+	FMSUB_D,
+	FNMADD_S,
+	FNMADD_D,
+	FNMSUB_S,
+	FNMSUB_D,
+	FCMP_cond_S,
+	FCMP_cond_D,
+	FSEL,
+	ADDU16I_D,
+	LU12I_W,
+	LU12I_D,
+	PCADDI,
+	PCALAU12I,
+	PCADDU12I,
+	PCADDU18I,
+	LL_W,
+	SC_W,
+	LL_D,
+	SC_D,
+	LDPTR_W,
+	STPTR_W,
+	LDPTR_D,
+	STPTR_D,
+	LD_B,
+	LD_H,
+	LD_W,
+	LD_D,
+	ST_B,
+	ST_H,
+	ST_W,
+	ST_D,
+	LD_BU,
+	LD_HU,
+	LD_WU,
+	PRELD,
+	FLD_S,
+	FST_S,
+	FLD_D,
+	FST_D,
+	LDX_B,
+	LDX_H,
+	LDX_W,
+	LDX_D,
+	STX_B,
+	STX_H,
+	STX_W,
+	STX_D,
+	LDX_BU,
+	LDX_HU,
+	LDX_WU,
+	PRELDX,
+	FLDX_S,
+	FLDX_D,
+	FSTX_S,
+	FSTX_D,
+	AMSWAP_W,
+	AMSWAP_D,
+	AMADD_W,
+	AMADD_D,
+	AMAND_W,
+	AMAND_D,
+	AMOR_W,
+	AMOR_D,
+	AMXOR_W,
+	AMXOR_D,
+	AMMAX_W,
+	AMMAX_D,
+	AMMIN_W,
+	AMMIN_D,
+	AMMAX_WU,
+	AMMAX_DU,
+	AMMIN_WU,
+	AMMIN_DU,
+	AMSWAP_DB_W,
+	AMSWAP_DB_D,
+	AMADD_DB_W,
+	AMADD_DB_D,
+	AMAND_DB_W,
+	AMAND_DB_D,
+	AMOR_DB_W,
+	AMOR_DB_D,
+	AMXOR_DB_W,
+	AMXOR_DB_D,
+	AMMAX_DB_W,
+	AMMAX_DB_D,
+	AMMIN_DB_W,
+	AMMIN_DB_D,
+	AMMAX_DB_WU,
+	AMMAX_DB_DU,
+	AMMIN_DB_WU,
+	AMMIN_DB_DU,
+	DBAR,
+	IBAR,
+	FLDGT_S,
+	FLDGT_D,
+	FLDLE_S,
+	FLDLE_D,
+	FSTGT_S,
+	FSTGT_D,
+	FSTLE_S,
+	FSTLE_D,
+	LDGT_B,
+	LDGT_H,
+	LDGT_W,
+	LDGT_D,
+	LDLE_B,
+	LDLE_H,
+	LDLE_W,
+	LDLE_D,
+	STGT_B,
+	STGT_H,
+	STGT_W,
+	STGT_D,
+	STLE_B,
+	STLE_H,
+	STLE_W,
+	STLE_D,
+	BEQZ,
+	BNEZ,
+	BCEQZ,
+	BCNEZ,
+	JIRL,
+	B,
+	BL,
+	BEQ,
+	BNE,
+	BLT,
+	BGE,
+	BLTU,
+	BGEU,
+}

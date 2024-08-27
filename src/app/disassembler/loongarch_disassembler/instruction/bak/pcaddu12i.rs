@@ -1,0 +1,23 @@
+#[allow(unused)]
+use super::*;
+use super::super::*;
+
+pub fn pcaddu12i(code: u32, address: usize, symbol: HashMap<usize, SymbolRecord>) -> AssemblyInstruction {
+	let mut assembly_instruction = AssemblyInstruction::new();
+	assembly_instruction.opcode = Opcode::PCADDU12I;
+
+	let mut operand = Operand {
+		operand_type: OperandType::GeneralRegister,
+		value: 0,
+	};
+
+	operand.value = (code as usize) & ((1 << 5) - 1);
+	assembly_instruction.operand1 = Some(operand.clone());
+
+	let value = (code as usize >> 5) & ((1 << 20) - 1);
+    operand.value = sign_extend(value, 20) as usize;
+	operand.operand_type = OperandType::SignedImm;
+	assembly_instruction.operand2 = Some(operand.clone());
+
+	assembly_instruction
+}

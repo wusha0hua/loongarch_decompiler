@@ -1,0 +1,1028 @@
+use crate::loongarch_decomplier::*;
+
+#[derive(Debug, Clone)]
+pub struct ControlFlowTree {
+    pub id: usize,
+    pub is_sink: bool,
+    pub node_type: NodeType,
+    pub access_condiction: Vec<Vec<isize>>,
+    pub condiction: Option<isize>,
+    pub true_next: Option<Box<ControlFlowTree>>,
+    pub false_next: Option<Box<ControlFlowTree>>,
+    pub loop_region: Option<Box<ControlFlowTree>>,
+    pub next: Vec<Box<ControlFlowTree>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ControlFlowGraph {
+    pub nodes: HashMap<usize, CFGNode>,
+    pub edges: HashMap<usize, CFGEdge>,
+    pub condiction: HashMap<Condiction, isize>,
+    pub topo_index: Vec<usize>,
+    pub _topo_index: Vec<Vec<usize>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CFGNode {
+    pub id: usize,
+    pub index: usize,
+    pub node_type: NodeType,
+    pub irs: Vec<DataFlowIr>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CFGEdge {
+    pub id: usize,
+    pub from: usize,
+    pub to: usize,
+    pub edge_type: EdgeType,
+    pub condiction: Option<Condiction>,
+    pub _true: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Branch {
+    True,
+    False,
+    Next,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum NodeType {
+    None,
+    Back,
+    Break,
+    Loop,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum EdgeType {
+    None,
+    Break,
+    LoopEnter,
+    LoopExit,
+    Back,
+}
+
+impl ControlFlowGraph {
+    pub fn new() -> Self {
+        Self {
+            nodes: HashMap::new(),
+            edges: HashMap::new(),
+            condiction: HashMap::new(),
+            topo_index: Vec::new(),
+            _topo_index: Vec::new(),
+        }
+    }
+
+    pub fn build_control_flow_graph(blocks: HashMap<usize, Block>) -> ControlFlowGraph {
+        let mut cfg = ControlFlowGraph::new(); 
+        let mut edge_counter = Counter::new();
+        let mut condiction_id = 1;
+        for block in blocks {
+            let id = block.0;
+            let block = block.1;
+            
+            let node = CFGNode {
+                id,
+                index: 0,
+                node_type: NodeType::None,
+                irs: block.irs,
+            };
+            cfg.nodes.insert(id, node);
+    
+            if let Some(next) = block.next {
+                let edge = CFGEdge {
+                    id: edge_counter.get(),
+                    from: id,
+                    to: next,
+                    edge_type: EdgeType::None,
+                    condiction: block.condiction.clone(),
+                    _true: None,
+                };
+                cfg.edges.insert(edge.id, edge);
+            }
+    
+            if let Some(true_next) = block.true_next {
+                let edge = CFGEdge {
+                    id: edge_counter.get(),
+                    from: id,
+                    to: true_next,
+                    edge_type: EdgeType::None,
+                    condiction: block.condiction.clone(),
+                    _true: Some(true),
+                };
+                cfg.edges.insert(edge.id, edge);
+                if let Some(condiction) = &block.condiction {
+                    if let None = cfg.condiction.get(condiction) {
+                        cfg.condiction.insert(condiction.clone(), condiction_id);
+                        condiction_id += 1;
+                    }
+                }
+            }
+    
+            if let Some(false_next) = block.false_next {
+                let edge = CFGEdge {
+                    id: edge_counter.get(),
+                    from: id,
+                    to: false_next,
+                    edge_type: EdgeType::None,
+                    condiction: block.condiction.clone(),
+                    _true: Some(false),
+                };
+                cfg.edges.insert(edge.id, edge);
+                if let Some(condiction) = &block.condiction {
+                    if let None = cfg.condiction.get(condiction) {
+                        cfg.condiction.insert(condiction.clone(), condiction_id);
+                        condiction_id += 1;
+                    }
+                }
+            }
+    
+        }   
+    
+        //println!("{:#?}", cfg.condiction);
+        cfg
+    }
+
+    pub fn restruct_from_cycle(&mut self) {
+        let mut paths = get_cycle_paths(&self); 
+        let first_loop = paths.first().unwrap();
+        if paths.len() != 0 {
+            let mut delete_node = HashSet::<CFGNode>::new();
+            let mut delete_edge = HashSet::<CFGEdge>::new();
+
+            let graph = simplify(&self);
+            //let first_loop = paths.first().unwrap();
+            let (mut entrys_map, mut exits_map) = get_entry_exit(&self, first_loop);
+            let mut loop_head = 0;
+            let mut loop_back = 0;
+            let mut loop_break = Vec::<usize>::new();
+            let mut loop_exit = 0;
+
+            let mut nid = self.nodes.len();
+
+            let loop_id = nid;
+            let loop_node = CFGNode {
+                id: loop_id,
+                index: 0,
+                node_type: NodeType::Loop,
+                irs: Vec::new(),
+            };
+            nid += 1;
+            self.nodes.insert(loop_id, loop_node);
+
+
+            if entrys_map.len() > 1 {
+                println!("{:?}", entrys_map);
+                panic!("error");
+            } else {
+                for entry in entrys_map.iter() {
+                    loop_head = *entry.0;
+                    break;
+                }
+            }
+
+            if exits_map.len() > 1 {
+                let exit_sink_id = nid;
+                let mut exit_sink = CFGNode {
+                    id: exit_sink_id,
+                    index: 0,
+                    node_type: NodeType::None,
+                    irs: Vec::new(),
+                };
+                nid += 1;
+                self.nodes.insert(exit_sink_id, exit_sink);
+
+                let mut pre_edge = CFGEdge {
+                    id: 0,
+                    from: 0,
+                    to: 0,
+                    edge_type: EdgeType::None,
+                    condiction: None,
+                    _true: None,
+                };
+
+
+                for (i, (exit, breakv)) in exits_map.iter().enumerate() {
+                    if i != exits_map.len() -1 {
+                        for b in breakv.iter() {
+                            let from = b;
+                            let to = exit;
+
+                            let old_egde = match self.get_cfg_edge(*from, *to) {
+                                Some(old_egde) => old_egde,
+                                None => panic!("error"),
+                            };
+
+                            self.edges.remove(&old_egde.id);
+
+                            let mut edge = old_egde;
+                            edge.to = exit_sink_id;
+                            //----------------------------------------edge.edge_type = EdgeType::Break;
+                            edge.edge_type = EdgeType::None;
+                            
+                            self.edges.insert(edge.id, edge.clone());
+
+                            if i == 0 {
+                                edge.from = exit_sink_id;
+                                edge.to = *to;
+                                edge.id = self.new_edge_id();
+
+                                self.edges.insert(edge.id, edge.clone());
+
+                                pre_edge.id = self.new_edge_id();
+                                pre_edge.from = exit_sink_id;
+                                pre_edge.condiction = edge.condiction.clone();
+                                pre_edge.edge_type = EdgeType::None;
+                                
+                                match edge._true.as_ref() {
+                                    Some(true) => pre_edge._true = Some(false),
+                                    Some(false) => pre_edge._true = Some(true),
+                                    None => panic!("error"),
+                                }
+
+                            } else {
+                                let mut node = CFGNode {
+                                    id: nid,
+                                    index: 0,
+                                    node_type: NodeType::None,
+                                    irs: Vec::new(),
+                                };
+                                nid += 1;
+
+                                pre_edge.to = node.id;
+                                self.edges.insert(pre_edge.id, pre_edge.clone());
+
+                                let edge = CFGEdge {
+                                    id: self.new_edge_id(),
+                                    from: node.id,
+                                    to: *to,
+                                    edge_type: EdgeType::None,
+                                    condiction: edge.condiction.clone(),
+                                    _true: edge._true.clone(),
+                                };
+
+                                self.edges.insert(edge.id, edge.clone());
+
+
+                                pre_edge.id = self.new_edge_id();
+                                pre_edge.from = node.id;
+                                pre_edge.condiction = edge.condiction.clone();
+                                match edge._true.as_ref() {
+                                    Some(true) => pre_edge._true = Some(false),
+                                    Some(false) => pre_edge._true = Some(true),
+                                    None => panic!("error"),
+                                }
+
+                                self.nodes.insert(node.id, node);
+                            }
+
+                        }
+                    } else {
+                        for b in breakv.iter() {
+                            let from = b;
+                            let to = exit;
+
+                            let old_egde = match self.get_cfg_edge(*from, *to) {
+                                Some(old_egde) => old_egde,
+                                None => panic!("error"),
+                            };
+
+                            self.edges.remove(&old_egde.id);
+
+                            let mut edge = old_egde;
+                            edge.to = exit_sink_id;
+                            edge.edge_type = EdgeType::Break;
+
+                            self.edges.insert(edge.id, edge);
+
+                            pre_edge.to = *to;
+
+                            self.edges.insert(pre_edge.id, pre_edge.clone());
+                        }
+                    } 
+
+
+                }
+
+                /*
+                println!("-----------------------------");
+                println!("nodes: ");
+                for v in self.nodes.iter() {
+                    print!("{} ", v.0);
+                }
+                println!("\nedges: ");
+                for e in self.edges.iter() {
+                    println!("{} -> {}", e.1.from, e.1.to);
+                }
+                */
+                (entrys_map, exits_map) = get_entry_exit(&self, first_loop);
+                for exit in exits_map.iter() {
+                    loop_exit = *exit.0;
+                    loop_break = exit.1.clone();
+                }
+
+                //println!("exits_map: {:?}", exits_map);
+
+                //panic!("error");
+            } else {
+                for exit in exits_map.iter() {
+                    loop_break = exit.1.clone();
+                    loop_exit = *exit.0;
+                    break;
+                }
+            }
+            
+            let mut entrys = HashSet::<usize>::new();
+            let mut exits = HashSet::<usize>::new();
+
+            for v in entrys_map[&loop_head].iter() {
+                let old_egde = match self.get_cfg_edge(*v, loop_head) {
+                    Some(old_egde) => old_egde,
+                    None => panic!("error"),
+                };
+                let edge_id = self.new_edge_id();
+                let new_edge = CFGEdge {
+                    id: edge_id,
+                    from: *v,
+                    to: loop_id,
+                    edge_type: EdgeType::None,
+                    condiction: old_egde.condiction,
+                    _true: old_egde._true,
+                }; 
+
+                self.edges.remove(&old_egde.id);
+                self.edges.insert(edge_id, new_edge);
+            }
+
+           
+
+            /*
+            let break_node = CFGNode {
+                id: nid,
+                index: 0,
+                node_type: NodeType::Break,
+                irs: Vec::new(),
+            };
+            nid += 1;
+            */
+
+
+            for v in exits_map[&loop_exit].iter() {
+                let from = *v;
+                let to = loop_exit;
+
+                let old_egde = match self.get_cfg_edge(*v, loop_exit) {
+                    Some(old_egde) => old_egde,
+                    None => panic!("error"),
+                };               
+
+                let break_node = CFGNode {
+                    id: nid,
+                    index: 0,
+                    node_type: NodeType::Break,
+                    irs: Vec::new(),
+                };
+                nid += 1;
+
+                let break_edge = CFGEdge {
+                    id: self.new_edge_id(),
+                    from,
+                    to: break_node.id,
+                    edge_type: EdgeType::Break,
+                    condiction: old_egde.condiction,
+                    _true: old_egde._true,
+                };
+
+
+                self.edges.remove(&old_egde.id);
+                self.edges.insert(break_edge.id, break_edge);
+                self.nodes.insert(break_node.id, break_node);
+            }
+
+
+            let exit_edge = CFGEdge {
+                id: self.new_edge_id(),
+                from: loop_id,
+                to: loop_exit,
+                edge_type: EdgeType::LoopExit,
+                condiction: None,
+                _true: None,
+            };
+
+            self.edges.insert(exit_edge.id, exit_edge);
+
+            for v in first_loop.iter() {
+                if graph.childs[v].iter().any(|c| *c == loop_head) {
+                    loop_back = *v;
+                    break;
+                }
+            }
+
+            let old_back_edge = match self.get_cfg_edge(loop_back, loop_head) {
+                Some(edge) => edge,
+                None => panic!("error"),
+            };
+
+            let back_node = CFGNode {
+                id: nid,
+                index: 0,
+                node_type: NodeType::Back,
+                irs: Vec::new(),
+            };
+            nid += 1;
+
+            let back_edge = CFGEdge {
+                id: self.new_edge_id(),
+                from: loop_back,
+                to: back_node.id,
+                edge_type: EdgeType::Back,
+                condiction: old_back_edge.condiction,
+                _true: old_back_edge._true,
+            };
+
+            self.edges.remove(&old_back_edge.id);
+            self.edges.insert(back_edge.id, back_edge);
+
+            let enter_edge = CFGEdge {
+                id: self.new_edge_id(), 
+                from: loop_id,
+                to: loop_head,
+                edge_type: EdgeType::LoopEnter,
+                condiction: None,
+                _true: None,
+            };
+
+            self.edges.insert(enter_edge.id, enter_edge);
+
+            //self.nodes.insert(break_node.id, break_node);
+            self.nodes.insert(back_node.id, back_node);
+
+            /*
+            for e in self.edges.iter() {
+                println!("{} -> {}", e.1.from, e.1.to);
+            }
+            */
+            /*
+            println!("-----------------------------");
+            println!("nodes: ");
+            for v in self.nodes.iter() {
+                println!("{}: {:?}", v.0, v.1.node_type);
+            }
+            println!("\nedges: ");
+            for e in self.edges.iter() {
+                println!("{} -> {}", e.1.from, e.1.to);
+            }
+            */
+
+
+            /*
+            println!("loop: {:?}", paths);
+            println!("entrys: {:?}", entrys_map);
+            println!("exits: {:?}", exits_map);
+            println!("head {}", loop_head);
+            println!("break {}", loop_break);
+            prointln!("back {}\n", loop_back);
+            */
+
+        }
+    }
+
+    fn get_cfg_edge(&self, from: usize, to: usize) -> Option<CFGEdge> {
+        for edge in self.edges.iter() {
+            if edge.1.from == from && edge.1.to == to {
+                return Some(edge.1.clone());
+            }
+        } 
+        None
+    }
+
+    fn new_edge_id(&self) -> usize {
+        let mut i = 0;
+        while i < usize::MAX {
+            if let None = self.edges.get(&i) {
+                break;
+            } 
+            i += 1;
+        }
+
+        return i;
+    }
+}
+
+impl ControlFlowTree {
+    pub fn new(root: usize) -> Self {
+        Self {
+            id: root,
+            is_sink: false,
+            node_type: NodeType::None,
+            access_condiction: Vec::new(),
+            condiction: None,
+            true_next: None,
+            false_next: None,
+            loop_region: None,
+            next: Vec::new(),
+        }
+    }
+
+    pub fn insert(&mut self, parent: usize, id: usize, branch: Branch, condiction: Option<isize>, edge_type: &EdgeType) {
+        if self.id  == parent {
+            let mut tree = ControlFlowTree::new(id);
+            self.condiction = condiction;
+            //let mut c = self.access_condiction[0].clone();
+            /*
+            let mut c = match self.access_condiction.get(0) {
+                Some(c) => c.clone(),
+                None => Vec::new(),
+            };
+            */
+            let mut cond_id = 0;
+            if let Some(id) = condiction {
+                cond_id = id;
+            }
+            match &branch {
+                Branch::Next => {
+                    /*
+                    let mut cond = Vec::new();
+                    cond.push(c);
+                    */
+                    //let mut cond = self.access_condiction.clone();
+                    //tree.access_condiction = cond;
+                    match edge_type {
+                        EdgeType::None => self.next.push(Box::new(tree)),
+                        EdgeType::LoopEnter => {
+                            self.node_type = NodeType::Loop;
+                            self.loop_region = Some(Box::new(tree));
+                        }
+                        EdgeType::Back => {
+                            tree.node_type = NodeType::Back;
+                            self.next.push(Box::new(tree));
+                        }
+                        EdgeType::Break => {
+                            tree.node_type = NodeType::Break;
+                            self.next.push(Box::new(tree));
+                        }
+                        _ => {}
+                    }
+                    //self.next = Some(Box::new(tree));  
+                }
+                Branch::True => {
+                    /*
+                    let mut cond = Vec::new();
+                    c.push(cond_id);
+                    cond.push(c);
+                    */
+                    let mut cond;
+                    if self.access_condiction.len() == 0 {
+                        cond = Vec::new();
+                        cond.push(Vec::new());
+                    } else {
+                        cond = self.access_condiction.clone();
+                    }
+                    for c in cond.iter_mut() {
+                        c.push(cond_id);
+                    }
+                    tree.access_condiction = cond;
+                    match edge_type {
+                        EdgeType::Break => tree.node_type = NodeType::Break,
+                        EdgeType::Back => tree.node_type = NodeType::Back,
+                        _ => {}
+                    }
+                    self.true_next = Some(Box::new(tree));
+                }
+                Branch::False => {
+                    /*
+                    let mut cond = Vec::new();
+                    c.push(-cond_id);
+                    cond.push(c);
+                    */
+                    let mut cond;
+                    if self.access_condiction.len() == 0 {
+                        cond = Vec::new();
+                        cond.push(Vec::new());
+                    } else {
+                        cond = self.access_condiction.clone();
+                    }
+                    for c in cond.iter_mut() {
+                        c.push(-cond_id);
+                    }
+                    tree.access_condiction = cond;
+                    match edge_type {
+                        EdgeType::Break => tree.node_type = NodeType::Break,
+                        EdgeType::Back => tree.node_type = NodeType::Back,
+                        _ => {}
+                    }
+                    self.false_next = Some(Box::new(tree));
+                }
+            }
+            return;
+        } else {
+            /*
+            if let Some(next) = self.next.as_mut() {
+                next.insert(parent, id, branch.clone(), condiction);
+            }
+            */
+            if let Some(true_next) = self.true_next.as_mut() {
+                true_next.insert(parent, id, branch.clone(), condiction, edge_type);
+            } 
+            if let Some(false_next) = self.false_next.as_mut() {
+                false_next.insert(parent, id, branch.clone(), condiction, edge_type);
+            }
+            for next in self.next.iter_mut() {
+                next.insert(parent, id, branch.clone(), condiction, edge_type);
+            }
+
+            if let Some(loop_region) = self.loop_region.as_mut() {
+                loop_region.insert(parent, id, branch.clone(), condiction, edge_type);
+            }
+        } 
+    }
+
+    pub fn attach(&mut self, parent: usize, id: usize) {
+        if self.id == parent {
+            let mut tree = ControlFlowTree::new(id);
+            tree.is_sink = true;
+            self.next.push(Box::new(tree));
+            return;
+        } else {
+            if let Some(true_next) = self.true_next.as_mut() {
+                true_next.attach(parent, id);
+            } 
+            if let Some(false_next) = self.false_next.as_mut() {
+                false_next.attach(parent, id);
+            }
+            for next in self.next.iter_mut() {
+                next.attach(parent, id);
+            }
+        }
+    }
+
+    pub fn put_outer(&mut self, id: usize, access_condiction: Vec<Vec<isize>>) {
+        let mut tree = ControlFlowTree::new(id); 
+        tree.is_sink = true;
+        tree.access_condiction = quine_mccluskey(access_condiction);
+        self.next.push(Box::new(tree));
+    }
+
+    pub fn set_loop(&mut self, loop_id: usize, loop_start: usize) {
+        if self.id == loop_id {
+            self.node_type = NodeType::Loop;
+            let mut tree = ControlFlowTree::new(loop_start);
+            self.loop_region = Some(Box::new(tree));
+        } else {
+            if let Some(true_next) = self.true_next.as_mut() {
+                true_next.set_loop(loop_id, loop_start);
+            }
+            if let Some(false_next) = self.false_next.as_mut() {
+                false_next.set_loop(loop_id, loop_start);
+            }
+            for next in self.next.iter_mut() {
+                next.set_loop(loop_id, loop_start);
+            }
+            if let Some(loop_region) = self.loop_region.as_mut() {
+                loop_region.set_loop(loop_id, loop_start);
+            }
+        }
+    }
+
+    pub fn set_break(&mut self, parent: usize, id: usize) {
+        if self.id == parent {
+            self.node_type = NodeType::Break;
+            let mut tree = ControlFlowTree::new(id);
+            self.loop_region = Some(Box::new(tree));
+        } else {
+            if let Some(true_next) = self.true_next.as_mut() {
+                true_next.set_break(parent, id);
+            }
+            if let Some(false_next) = self.false_next.as_mut() {
+                false_next.set_break(parent, id);
+            }
+            for next in self.next.iter_mut() {
+                next.set_break(parent, id);
+            }
+            if let Some(loop_region) = self.loop_region.as_mut() {
+                loop_region.set_break(parent, id);
+            }
+        }
+    }
+
+    pub fn set_back(&mut self, parent: usize, id: usize) {
+        if self.id == parent {
+            let mut tree = ControlFlowTree::new(id);
+            tree.node_type = NodeType::Break;
+            self.next.push(Box::new(tree));
+        } else {
+            if let Some(true_next) = self.true_next.as_mut() {
+                true_next.set_back(parent, id);
+            }
+            if let Some(false_next) = self.false_next.as_mut() {
+                false_next.set_back(parent, id);
+            }
+            for next in self.next.iter_mut() {
+                next.set_back(parent, id);
+            }
+            if let Some(loop_region) = self.loop_region.as_mut() {
+                loop_region.set_back(parent, id);
+            }
+        }
+    }
+
+    pub fn search(&self, id: usize) -> Option<ControlFlowTree> {
+        if self.id == id {
+            return Some(self.clone());
+        } else {
+            if let Some(loop_region) = self.loop_region.as_ref() {
+                if let Some(res) = loop_region.search(id) {
+                    return Some(res);
+                }
+            }
+            if let Some(true_next) = self.true_next.as_ref() {
+                if let Some(res) = true_next.search(id) {
+                    return Some(res);
+                }
+            }   
+            if let Some(false_next) = self.false_next.as_ref() {
+                 if let Some(res) = false_next.search(id) {
+                    return Some(res);
+                }   
+            }
+            for next in self.next.iter() {
+                if let Some(res) = next.search(id) {
+                    return Some(res);
+                }
+            }
+        }
+        None
+    }
+
+    pub fn get_parent(&self, id: usize) -> Option<usize> {
+        //println!("{} {}", id, self.id);
+        if self.next.iter().any(|next| next.id == id) {
+            return Some(self.id);
+        } else {
+             if let Some(true_next) = self.true_next.as_ref() {
+                return true_next.get_parent(id);
+            }   
+            if let Some(false_next) = self.false_next.as_ref() {
+                return false_next.get_parent(id);
+            }
+            for next in self.next.iter() {
+                return next.get_parent(id);
+            }
+        }
+        None
+    }
+
+    
+    pub fn to_string(&self) -> String {
+        let mut tree_str = String::new();
+        let mut indent = 0;     
+        self.to_string_recursion(&mut tree_str, &mut indent); 
+        tree_str
+    } 
+
+    fn to_string_recursion(&self, tree_str: &mut String, indent: &mut usize) {
+        if self.node_type == NodeType::Loop {
+            *tree_str += &format!("{}loop\n", ControlFlowTree::indent(*indent));
+            *tree_str += &format!("{}{}\n", ControlFlowTree::indent(*indent), "{");
+            *indent += 1;
+            match self.loop_region.as_ref() {
+                Some(loop_region) => loop_region.to_string_recursion(tree_str, indent),
+                None => panic!("error"),
+            }
+            *indent -= 1;
+            *tree_str += &format!("{}{}", ControlFlowTree::indent(*indent), "}");
+        } else if self.node_type == NodeType::Break {
+            *tree_str += &format!("{}break;", ControlFlowTree::indent(*indent));
+        } else if self.node_type == NodeType::Back {
+            *tree_str += &format!("{}continue;", ControlFlowTree::indent(*indent));
+        } else { 
+            *tree_str += &format!("{}", ControlFlowTree::indent(*indent));              
+            *tree_str += &format!("b{}", self.id);
+            if let Some(c_id) = self.condiction {
+                *tree_str += "\n";
+                if let Some(true_next) = &self.true_next {
+                    //*tree_str += &format!("{}if(c{}) \n{}{}\n", ControlFlowTree::indent(*indent), isize::abs(c_id), ControlFlowTree::indent(*indent), "{");
+                    if c_id < 0 {
+                    *tree_str += &format!("{}if(!c{}) \n{}{}\n", ControlFlowTree::indent(*indent), isize::abs(c_id), ControlFlowTree::indent(*indent), "{");
+                    } else {
+                    *tree_str += &format!("{}if(c{}) \n{}{}\n", ControlFlowTree::indent(*indent), isize::abs(c_id), ControlFlowTree::indent(*indent), "{");
+                    }
+                    *indent += 1;
+                    true_next.to_string_recursion(tree_str, indent);
+                    *indent -= 1;
+                    *tree_str += &format!("\n{}{}",ControlFlowTree::indent(*indent), "}");
+                    if let Some(false_next) =&self.false_next {
+                        *tree_str += " else {\n";
+                        *indent += 1;
+                        false_next.to_string_recursion(tree_str, indent);
+                        *indent -= 1;
+                        *tree_str += &format!("\n{}{}\n", ControlFlowTree::indent(*indent), "}");
+                    } else {
+                        *tree_str += "\n";
+                    }
+                } else if let Some(false_next) = &self.false_next {
+                    //*tree_str += &format!("if(!c{}) \n{}{}\n", -c_id, ControlFlowTree::indent(*indent), "{");
+                    if c_id < 0 {
+                        *tree_str += &format!("if(!c{}) \n{}{}\n", isize::abs(c_id), ControlFlowTree::indent(*indent), "{");
+                    } else {
+                        *tree_str += &format!("if(c{}) \n{}{}\n", isize::abs(c_id), ControlFlowTree::indent(*indent), "{");
+                    }
+                    *indent += 1;
+                    false_next.to_string_recursion(tree_str, indent);
+                    *indent -= 1;
+                    *tree_str += &format!("{}{}", ControlFlowTree::indent(*indent), "}");
+                }
+            }        
+
+            for next in self.next.iter() {
+                *tree_str += "\n";
+                if next.is_sink && next.access_condiction.len() != 0 {
+                    *tree_str += &format!("{}if(", ControlFlowTree::indent(*indent));
+                    for i in 0..next.access_condiction.len() - 1 {
+                        let andset = &next.access_condiction[i];
+                        if andset.len() > 1 {
+                            *tree_str += "(";
+                            for j in 0..andset.len() - 1 {
+                                if andset[j] < 0 {
+                                    *tree_str += &format!("!c{} && ", isize::abs(andset[j]));
+                                } else {
+                                    *tree_str += &format!("c{} && ", andset[j]);
+                                }
+                            }
+                            
+                            if andset[andset.len() - 1] < 0 {
+                                *tree_str += &format!("!c{}", isize::abs(andset[andset.len() - 1]));
+                            } else {
+                                *tree_str += &format!("c{}", andset[andset.len() - 1]);
+                            }
+
+                        } else {
+                            let cid = next.access_condiction[next.access_condiction.len() - 1][0];
+                            if cid < 0 {
+                                *tree_str += &format!("!c{}", isize::abs(cid));
+                            } else {
+                                *tree_str += &format!("c{}", cid);
+                            }
+                        }
+
+                        *tree_str += ") || ";
+                    }
+
+                    let andset = &next.access_condiction[next.access_condiction.len() - 1];
+                    if andset.len() > 1 {
+                        *tree_str += "(";
+                        for j in 0..andset.len() - 1 {
+                            if andset[j] < 0 {
+                                *tree_str += &format!("!c{} && ", isize::abs(andset[j]));
+                            } else {
+                                *tree_str += &format!("c{} && ", andset[j]);
+                            }
+                        }
+                            
+                        if andset[andset.len() - 1] < 0 {
+                            *tree_str += &format!("!c{})", isize::abs(andset[andset.len() - 1]));
+                        } else {
+                            *tree_str += &format!("c{})", andset[andset.len() - 1]);
+                        }
+
+                    } else {
+                        let cid = next.access_condiction[next.access_condiction.len() - 1][0];
+                        if cid < 0 {
+                            *tree_str += &format!("!c{})", isize::abs(cid));
+                        } else {
+                            *tree_str += &format!("c{})", cid);
+                        }
+                    }
+
+                    
+                    *tree_str += &format!(") {}\n", "{");
+                    *indent += 1;
+                    next.to_string_recursion(tree_str, indent);
+                    *indent -= 1;
+                    *tree_str += &format!("\n{}{}\n", ControlFlowTree::indent(*indent), "}");
+                } else {
+                    next.to_string_recursion(tree_str, indent);
+                }
+            }
+        }
+    }
+
+    fn indent(indet: usize) -> String {
+        let mut str = String::new();
+        for _ in 0..indet {
+            str += "\t";
+        }
+        str
+    }
+
+    pub fn travel_cft_with_ast(&self, ast: &mut abstract_syntax_tree::AbstractSyntaxTree, cfg: &ControlFlowGraph, ast_symbol_map: &mut HashMap<usize, abstract_syntax_tree::ASTSymbol>, address_symbol_map: &mut HashMap<(Address, usize), usize>, counter: &mut Counter) {
+        let bid = self.id;
+        let dfi_ir = &cfg.nodes[&bid].irs;
+
+        if SHOW_CONTROL_FLOW_IN_DATA_FLOW_IR.load(std::sync::atomic::Ordering::SeqCst) {
+            println!("\n-------------------------------block: {}---------------------------", bid);
+            for ir in dfi_ir.iter() {
+                println!("{}", ir);
+            }
+        }
+
+        for ir in dfi_ir.iter() {
+            match AbstractSyntaxTree::parse_dfi(ir, ast_symbol_map, address_symbol_map, counter) {
+                Some(ast_ir_node) => {
+                    //println!("print from control_flow::travel_cft_with_ast:\n\t{:?}\t{}", ast_ir_node, ir);
+                    ast.next.push(Box::new(ast_ir_node));
+                }
+                None => {}
+            }
+            
+        }
+
+        if self.node_type == NodeType::Loop {
+            let mut loop_ast = AbstractSyntaxTree::new();
+            loop_ast.ast_type = ASTType::Loop;
+            match self.loop_region.as_ref() {
+                Some(loop_region) => loop_region.travel_cft_with_ast(&mut loop_ast, cfg, ast_symbol_map, address_symbol_map, counter),
+                None => panic!("error"),
+            }
+            ast.next.push(Box::new(loop_ast));
+        } else if self.node_type == NodeType::Back {
+            let mut continue_ast = AbstractSyntaxTree::new();
+            continue_ast.ast_type = ASTType::Continue;
+            ast.next.push(Box::new(continue_ast)); 
+        } else if self.node_type == NodeType::Break {
+            let mut break_ast = AbstractSyntaxTree::new();
+            break_ast.ast_type = ASTType::Break;
+            ast.next.push(Box::new(break_ast));
+        } else {
+            if let Some(c_id) = self.condiction {
+                let mut if_ast = AbstractSyntaxTree::new();
+                if_ast.ast_type = ASTType::If;
+                let condiction = get_key_from_value(&cfg.condiction, c_id).unwrap();
+                let cond_ast = AbstractSyntaxTree::parse_condiction(condiction, address_symbol_map, ast_symbol_map, counter);
+                if_ast.next.push(Box::new(cond_ast));
+                if let Some(true_next) = self.true_next.as_ref() {
+                    let mut true_ast = AbstractSyntaxTree::new();
+                    true_ast.ast_type = ASTType::True;
+                    true_next.travel_cft_with_ast(&mut true_ast, cfg, ast_symbol_map, address_symbol_map, counter);
+                    if true_ast.next.len() != 0 {
+                        if_ast.next.push(Box::new(true_ast));
+                    }
+                }
+                if let Some(false_next) = self.false_next.as_ref() {
+                    let mut false_ast = AbstractSyntaxTree::new();
+                    false_ast.ast_type = ASTType::False;
+                    false_next.travel_cft_with_ast(&mut false_ast, cfg, ast_symbol_map, address_symbol_map, counter);
+                    if false_ast.next.len() != 0 {
+                        if_ast.next.push(Box::new(false_ast));
+                    }
+                }
+                ast.next.push(Box::new(if_ast));
+            }
+
+
+            for next in self.next.iter() {
+                if next.access_condiction.len() == 0 {
+                    next.travel_cft_with_ast(ast, cfg, ast_symbol_map, address_symbol_map, counter);
+                } else {
+                    let mut if_ast = AbstractSyntaxTree::new();
+                    if_ast.ast_type = ASTType::If;
+                    let mut access_condiction = Vec::<Vec<Condiction>>::new();
+                    for andset in next.access_condiction.iter() {
+                        let mut andv = Vec::<Condiction>::new();
+                        for cid in andset.iter() {
+                            let mut condiction = get_key_from_value(&cfg.condiction, isize::abs(*cid)).unwrap();
+                            if *cid < 0 {
+                                condiction.relation = !condiction.relation;
+                            }
+                            andv.push(condiction);
+                        }
+                        access_condiction.push(andv);
+                    }
+                    let mut access_ast = AbstractSyntaxTree::parse_access_condiction(access_condiction, address_symbol_map, ast_symbol_map, counter);
+                    if_ast.next.push(Box::new(access_ast));
+                    let mut true_body_ast = AbstractSyntaxTree::new();
+                    true_body_ast.ast_type = ASTType::True;
+                    next.travel_cft_with_ast(&mut true_body_ast, cfg, ast_symbol_map, address_symbol_map, counter);
+                    if_ast.next.push(Box::new(true_body_ast));
+                    ast.next.push(Box::new(if_ast));
+                }
+            }
+        }
+
+
+    }
+
+
+}
+
+
+
+
+
+impl std::fmt::Display for ControlFlowTree {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { 
+        write!(f, "{}", self.to_string())
+    } 
+}
